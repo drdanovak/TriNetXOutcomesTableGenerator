@@ -4,27 +4,27 @@ import pandas as pd
 st.set_page_config(layout="wide")
 st.title("Outcomes Table Formatter (Journal Style)")
 
-uploaded_file = st.file_uploader("📂 Upload your Outcomes CSV (TriNetX format)", type=["csv", "xls", "xlsx"])
+uploaded_file = st.file_uploader("📂 Upload your Outcomes Table (.csv, .xls, .xlsx)", type=["csv", "xls", "xlsx"])
 if not uploaded_file:
-    st.info("Please upload your outcomes table CSV.")
+    st.info("Please upload your outcomes table file.")
     st.stop()
 
-# Load the CSV (skip metadata/header lines if needed)
-try:
-    df = pd.read_csv(uploaded_file, header=None, skiprows=0)  # adjust skiprows as needed
-except Exception:
-    uploaded_file.seek(0)
+filename = uploaded_file.name.lower()
+if filename.endswith(".csv"):
+    df = pd.read_csv(uploaded_file, header=None)
+elif filename.endswith((".xls", ".xlsx")):
     df = pd.read_excel(uploaded_file, header=None)
+else:
+    st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
+    st.stop()
 
 # Basic assumption: first row is header, next two are cohort rows, optional: stat row(s)
 header = list(df.iloc[0])
 cohort1 = list(df.iloc[1])
 cohort2 = list(df.iloc[2])
 
-# Optionally, parse more rows for summary statistics as needed
-
-# Manual mapping for summary stats (example: you might calculate or extract from file)
-# Replace these with the correct columns/indexes or calculate if needed
+# (Optional) Manually input summary stats or extract/calculate as needed
+# Replace these with correct column indexes or automate extraction if preferred
 stats = {
     "risk_diff": "5%",
     "risk_diff_ci": "(2%, 8%)",
