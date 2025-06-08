@@ -6,7 +6,7 @@ st.title("TriNetX Multi-Outcome Table (Stacked & Customizable)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload multiple TriNetX outcome Excel files (.xls or .xlsx)",
-    type=["xls", "xlsx"], accept_multiple_files=True
+    type=["xls", "xlsx", "csv"], accept_multiple_files=True
 )
 
 if not uploaded_files:
