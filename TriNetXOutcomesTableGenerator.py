@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Multi-Outcome Table (Fully Customizable)")
+st.title("TriNetX Multi-Outcome Table (Direct Stat Extraction)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload multiple TriNetX outcome files (.csv, .xls, or .xlsx)",
@@ -32,7 +32,6 @@ with st.sidebar:
 
 def extract_outcome_data(file):
     file_ext = os.path.splitext(file.name)[-1].lower()
-    # Read according to extension
     if file_ext in [".xls", ".xlsx"]:
         df = pd.read_excel(file, header=None)
     elif file_ext == ".csv":
@@ -45,9 +44,9 @@ def extract_outcome_data(file):
             file.seek(0)
             df = pd.read_csv(file, header=None)
     else:
-        return None  # skip unsupported file
+        return None
 
-    # --- Find header row with "Cohort" ---
+    # Find header row with "Cohort"
     header_row = None
     for i, row in df.iterrows():
         if any(str(cell).strip().lower().startswith("cohort") for cell in row):
@@ -56,7 +55,7 @@ def extract_outcome_data(file):
     if header_row is None:
         return None
 
-    # --- Grab the cohort data ---
+    # --- Cohort data extraction ---
     data = df.iloc[header_row:header_row+3].copy()
     data.columns = list(data.iloc[0])
     data = data.iloc[1:].reset_index(drop=True)
@@ -73,52 +72,29 @@ def extract_outcome_data(file):
     cname1 = c1.get("Cohort Name", "")
     cname2 = c2.get("Cohort Name", "")
 
-    # Try to get summary stats as columns in the next row(s)
-    stats_row_idx = header_row + 3
-    stats_row = None
-    if stats_row_idx < len(df):
-        possible_row = df.iloc[stats_row_idx]
-        if any(str(col).lower().strip() in [
-            "risk difference", "odds ratio", "z", "p", "95 % ci lower", "95 % ci upper"
-        ] for col in possible_row):
-            # This is a header row for stats
-            stats_row = pd.Series({str(k): v for k, v in zip(possible_row, df.iloc[stats_row_idx+1])})
-
-    # Extract values for stats, trying both column and row parsing
-    def get_stat_val(keys, fallback=""):
-        # Try as column in stats_row first
-        if stats_row is not None:
-            for k in keys:
-                v = stats_row.get(k, "")
-                if pd.notna(v) and str(v).strip() not in ["", "nan"]:
-                    return v
-        # Fallback: parse as text in post-cohort lines (row-based)
-        for i in range(header_row+3, min(header_row+10, len(df))):
-            txt = " ".join(str(x) for x in df.iloc[i] if pd.notna(x))
-            for k in keys:
-                if k.lower() in txt.lower():
-                    # Try to extract value after ":"
-                    after = txt.lower().split(k.lower()+":")[-1].strip()
-                    if after:
-                        # stop at next space or parenthesis
-                        return after.split()[0].replace("(", "").replace(")", "")
-        return fallback
-
-    # Build CI string for risk diff and odds ratio
-    risk_diff = get_stat_val(["Risk Difference"])
-    risk_diff_ci_lower = get_stat_val(["95 % CI Lower", "Risk Difference Lower"])
-    risk_diff_ci_upper = get_stat_val(["95 % CI Upper", "Risk Difference Upper"])
-    risk_diff_ci = ""
-    if risk_diff_ci_lower or risk_diff_ci_upper:
-        risk_diff_ci = f"({risk_diff_ci_lower}, {risk_diff_ci_upper})"
-    odds_ratio = get_stat_val(["Odds Ratio"])
-    odds_ratio_ci_lower = get_stat_val(["Odds Ratio Lower", "95 % CI Lower"])
-    odds_ratio_ci_upper = get_stat_val(["Odds Ratio Upper", "95 % CI Upper"])
-    odds_ratio_ci = ""
-    if odds_ratio_ci_lower or odds_ratio_ci_upper:
-        odds_ratio_ci = f"({odds_ratio_ci_lower}, {odds_ratio_ci_upper})"
-    z_score = get_stat_val(["z", "Z"])
-    p_val = get_stat_val(["p", "P"])
+    # --- DIRECTLY EXTRACT STATISTICS FROM FIXED CELLS ---
+    stats_row_index = header_row + 14  # Row 17 in Excel is index 16, adjust as needed
+    if stats_row_index < len(df):
+        stat_row = df.iloc[stats_row_index]
+        # You may need to adjust column indices (0-based: A=0, B=1, C=2, D=3, E=4)
+        risk_diff      = stat_row[0] if len(stat_row) > 0 else ""
+        risk_diff_ci   = stat_row[1] if len(stat_row) > 1 else ""
+        odds_ratio     = stat_row[2] if len(stat_row) > 2 else ""
+        odds_ratio_ci  = stat_row[3] if len(stat_row) > 3 else ""
+        z_p            = stat_row[4] if len(stat_row) > 4 else ""
+        # Attempt to split Z and P if together (e.g., "z=1.1 p=0.03")
+        z_score, p_val = "", ""
+        if isinstance(z_p, str) and ("z=" in z_p.lower() or "p=" in z_p.lower()):
+            parts = z_p.replace("=", " ").replace(",", " ").split()
+            for i, part in enumerate(parts):
+                if part.lower() == "z":
+                    z_score = parts[i+1] if i+1 < len(parts) else ""
+                if part.lower() == "p":
+                    p_val = parts[i+1] if i+1 < len(parts) else ""
+        else:
+            z_score = z_p
+    else:
+        risk_diff = risk_diff_ci = odds_ratio = odds_ratio_ci = z_score = p_val = ""
 
     stats_row = {
         "Outcome": "",
