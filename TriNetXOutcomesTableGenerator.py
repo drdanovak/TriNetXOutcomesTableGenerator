@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Multi-Outcome Table (Stacked & Customizable)")
+st.title("TriNetX Multi-Outcome Table (Fully Customizable)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload multiple TriNetX outcome files (.csv, .xls, or .xlsx)",
@@ -16,12 +16,19 @@ if not uploaded_files:
 
 # --- UI: Formatting Options ---
 with st.sidebar:
-    st.header("Table Options")
+    st.header("Table Colors")
+    header_bg = st.color_picker("Header background", "#17456d")
+    header_fg = st.color_picker("Header text", "#ffffff")
+    band1_bg = st.color_picker("Band 1 background", "#e6f0fa")
+    band2_bg = st.color_picker("Band 2 background", "#f5faff")
+    stats_bg = st.color_picker("Statistics row background", "#f9eab3")
+    stats_fg = st.color_picker("Statistics row text", "#764600")
+    st.header("Other Options")
     banded = st.checkbox("Banded rows (zebra striping)", value=True)
     bold_headers = st.checkbox("Bold column headers", value=True)
     st.markdown("---")
     st.markdown("#### Rearrangement")
-    st.caption("Move outcomes up or down in the final table.")
+    st.caption("Drag outcome names to set display order below.")
 
 def extract_outcome_data(file):
     file_ext = os.path.splitext(file.name)[-1].lower()
@@ -29,7 +36,6 @@ def extract_outcome_data(file):
     if file_ext in [".xls", ".xlsx"]:
         df = pd.read_excel(file, header=None)
     elif file_ext == ".csv":
-        # Try TriNetX (skiprows=9) logic first, then fallback
         file.seek(0)
         try:
             df = pd.read_csv(file, header=None, skiprows=9)
@@ -57,7 +63,6 @@ def extract_outcome_data(file):
     outcome_name = file.name.rsplit('.', 1)[0]
     c1 = data.iloc[0]
     c2 = data.iloc[1]
-    # Find the risk column (could be "Risk" or "Risk Percentage")
     risk_col = [col for col in data.columns if "risk" in str(col).lower()][0]
     n1 = c1.get("Patients in Cohort", "")
     n2 = c2.get("Patients in Cohort", "")
@@ -88,6 +93,17 @@ def extract_outcome_data(file):
             z_score = txt.lower().split("z=")[-1].split()[0].replace(",", "")
         if "p=" in txt.lower():
             p_val = txt.lower().split("p=")[-1].split()[0].replace(",", "")
+    stats_row = {
+        "Outcome": "",
+        "Cohort": "<b>Statistics</b>",
+        "N": "",
+        "Events": "",
+        "Risk": f"<div style='color:{stats_fg}'>Risk Diff: {risk_diff}<br><span style='font-size:0.93em'>95% CI: {risk_diff_ci}</span></div>",
+        "Stat": f"<div style='color:{stats_fg}'>Odds Ratio: {odds_ratio}<br><span style='font-size:0.93em'>95% CI: {odds_ratio_ci}</span></div>",
+        "Odds Ratio": f"<div style='color:{stats_fg}'>Z: {z_score}</div>",
+        "Z": f"<div style='color:{stats_fg}'>P: {p_val}</div>",
+        "P": ""
+    }
     return [
         {
             "Outcome": outcome_name,
@@ -111,17 +127,7 @@ def extract_outcome_data(file):
             "Z": "",
             "P": ""
         },
-        {
-            "Outcome": "",
-            "Cohort": "<b>Statistics</b>",
-            "N": "",
-            "Events": "",
-            "Risk": f"Risk Diff: {risk_diff} <br><span style='font-size:0.93em'>95% CI: {risk_diff_ci}</span>",
-            "Stat": f"Odds Ratio: {odds_ratio} <br><span style='font-size:0.93em'>95% CI: {odds_ratio_ci}</span>",
-            "Odds Ratio": f"Z: {z_score}",
-            "Z": f"P: {p_val}",
-            "P": ""
-        }
+        stats_row
     ]
 
 # --- Extract and build all outcome blocks ---
@@ -133,72 +139,105 @@ for file in uploaded_files:
         outcome_blocks.append(block)
         outcome_names.append(block[0]["Outcome"])
 
-# --- Outcome Reordering with Up/Down Buttons ---
+# --- Outcome Reordering with Multiselect ---
 if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
-    st.session_state["order"] = outcome_names
+    st.session_state["order"] = outcome_names.copy()
 
-order = st.session_state["order"]
+order = st.sidebar.multiselect(
+    "Drag outcomes below to reorder for display:",
+    options=outcome_names,
+    default=st.session_state["order"],
+    key="outcome_order"
+)
 
-def move_outcome(idx, direction):
-    new_order = order.copy()
-    if direction == "up" and idx > 0:
-        new_order[idx], new_order[idx-1] = new_order[idx-1], new_order[idx]
-    elif direction == "down" and idx < len(order)-1:
-        new_order[idx], new_order[idx+1] = new_order[idx+1], new_order[idx]
-    st.session_state["order"] = new_order
-
-if len(order) > 1:
-    st.write("**Change outcome order:**")
-    for idx, name in enumerate(order):
-        cols = st.columns([6,1,1])
-        cols[0].markdown(f"<span style='font-size:1.02em'>{name}</span>", unsafe_allow_html=True)
-        if cols[1].button("⬆️", key=f"up_{name}", disabled=(idx==0)):
-            move_outcome(idx, "up")
-        if cols[2].button("⬇️", key=f"down_{name}", disabled=(idx==len(order)-1)):
-            move_outcome(idx, "down")
-    st.markdown("---")
+# Update the current session's order if changed via UI
+if order != st.session_state.get("order", []):
+    st.session_state["order"] = order
 
 # --- Build stacked table in chosen order ---
 all_rows = []
-for outcome_name in order:
+for outcome_name in st.session_state["order"]:
     idx = outcome_names.index(outcome_name)
     all_rows.extend(outcome_blocks[idx])
 
 stacked_df = pd.DataFrame(all_rows)
 
-def style_stacked_table(df, banded=True, bold_headers=True):
-    css = """
+def style_stacked_table(
+        df,
+        banded=True,
+        bold_headers=True,
+        header_bg="#17456d",
+        header_fg="#fff",
+        band1_bg="#e6f0fa",
+        band2_bg="#f5faff",
+        stats_bg="#f9eab3",
+        stats_fg="#764600"
+    ):
+    css = f"""
     <style>
-    .stacked-table {border-collapse:collapse;width:100%;font-family:Segoe UI,Arial,sans-serif;font-size:0.97em;}
+    .stacked-table {{
+        border-collapse:collapse;width:100%;font-family:Segoe UI,Arial,sans-serif;font-size:0.97em;
+    }}
+    .stacked-table th {{
+        background:{header_bg};
+        color:{header_fg};
+        padding:7px 6px;
+        font-size:1em;
+        border:1px solid #b8cbe9;
+        {"font-weight:700;" if bold_headers else "font-weight:400;"}
+    }}
+    .stacked-table td {{
+        border:1px solid #d4e1f2;
+        padding:7px 6px;
+        text-align:center;
+        vertical-align:middle;
+    }}
     """
-    if bold_headers:
-        css += ".stacked-table th {background:#17456d;color:#fff;padding:7px 6px;font-size:1em;border:1px solid #b8cbe9;font-weight:700;}"
-    else:
-        css += ".stacked-table th {background:#17456d;color:#fff;padding:7px 6px;font-size:1em;border:1px solid #b8cbe9;font-weight:400;}"
-    css += ".stacked-table td {border:1px solid #d4e1f2;padding:7px 6px;text-align:center;vertical-align:middle;}"
     if banded:
-        css += """
-        .stacked-table tbody tr:nth-child(3n+1) {background:#e6f0fa;}
-        .stacked-table tbody tr:nth-child(3n+2) {background:#f5faff;}
-        .stacked-table tbody tr:nth-child(3n)   {background:#f9eab3;font-weight:600;}
+        css += f"""
+        .stacked-table tbody tr.banded1 {{background:{band1_bg};}}
+        .stacked-table tbody tr.banded2 {{background:{band2_bg};}}
         """
     else:
         css += ".stacked-table tbody tr {background:#fff;}"
-        css += ".stacked-table tbody tr:nth-child(3n)   {background:#f9eab3;font-weight:600;}"
-    css += ".stacked-table td b {color:#764600;}"
-    css += ".stacked-table td span {color:#444;}"
-    css += "</style>"
+    css += f"""
+    .stacked-table tbody tr.stats-row {{
+        background: {stats_bg};
+        font-weight:600;
+    }}
+    .stacked-table td b, .stacked-table td span, .stacked-table td div {{
+        color:{stats_fg};
+    }}
+    </style>
+    """
     html = css + "<table class='stacked-table'><thead><tr>"
     for col in df.columns:
         html += f"<th>{col}</th>"
     html += "</tr></thead><tbody>"
-    for _, row in df.iterrows():
-        html += "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+    for i, row in df.iterrows():
+        # Choose row class
+        if (i % 3) == 2:
+            row_class = 'stats-row'
+        elif (i % 3) == 0:
+            row_class = 'banded1' if banded else ''
+        else:
+            row_class = 'banded2' if banded else ''
+        html += f"<tr class='{row_class}'>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
     html += "</tbody></table>"
     return html
 
 st.markdown("### Stacked Outcomes Table")
-st.markdown(style_stacked_table(stacked_df, banded=banded, bold_headers=bold_headers), unsafe_allow_html=True)
+st.markdown(style_stacked_table(
+    stacked_df,
+    banded=banded,
+    bold_headers=bold_headers,
+    header_bg=header_bg,
+    header_fg=header_fg,
+    band1_bg=band1_bg,
+    band2_bg=band2_bg,
+    stats_bg=stats_bg,
+    stats_fg=stats_fg,
+), unsafe_allow_html=True)
 
 st.download_button(
     "Download Stacked Table as CSV",
