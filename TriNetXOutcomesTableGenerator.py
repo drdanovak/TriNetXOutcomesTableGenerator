@@ -1,16 +1,17 @@
 import streamlit as st
 import pandas as pd
+import os
 
 st.set_page_config(layout="wide")
 st.title("TriNetX Multi-Outcome Table (Stacked & Customizable)")
 
 uploaded_files = st.file_uploader(
-    "📂 Upload multiple TriNetX outcome Excel files (.xls or .xlsx)",
-    type=["xls", "xlsx", "csv"], accept_multiple_files=True
+    "📂 Upload multiple TriNetX outcome files (.csv, .xls, or .xlsx)",
+    type=["csv", "xls", "xlsx"], accept_multiple_files=True
 )
 
 if not uploaded_files:
-    st.info("Upload at least two outcome Excel files exported from TriNetX.")
+    st.info("Upload at least two TriNetX outcome files exported from TriNetX.")
     st.stop()
 
 # --- UI: Formatting Options ---
@@ -22,10 +23,17 @@ with st.sidebar:
     st.markdown("#### Rearrangement")
     st.caption("Move outcomes up or down in the final table.")
 
-# --- Data Extraction Function ---
 def extract_outcome_data(file):
-    df = pd.read_excel(file, header=None)
-    # Find header row
+    file_ext = os.path.splitext(file.name)[-1].lower()
+    # Read according to extension
+    if file_ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(file, header=None)
+    elif file_ext == ".csv":
+        file.seek(0)
+        df = pd.read_csv(file, header=None)
+    else:
+        return None  # skip unsupported file
+    # --- rest of your parsing logic here, unchanged ---
     header_row = None
     for i, row in df.iterrows():
         if any(str(cell).strip().lower().startswith("cohort") for cell in row):
@@ -48,7 +56,6 @@ def extract_outcome_data(file):
     risk2 = c2.get(risk_col, "")
     cname1 = c1.get("Cohort Name", "")
     cname2 = c2.get("Cohort Name", "")
-    # Defaults for summary stats
     risk_diff = ""
     risk_diff_ci = ""
     odds_ratio = ""
@@ -70,7 +77,6 @@ def extract_outcome_data(file):
         if "p=" in txt.lower():
             p_val = txt.lower().split("p=")[-1].split()[0].replace(",", "")
     return [
-        # First row: Outcome + Cohort 1 data
         {
             "Outcome": outcome_name,
             "Cohort": cname1,
@@ -82,7 +88,6 @@ def extract_outcome_data(file):
             "Z": "",
             "P": ""
         },
-        # Second row: (Outcome blank) + Cohort 2 data
         {
             "Outcome": "",
             "Cohort": cname2,
@@ -94,7 +99,6 @@ def extract_outcome_data(file):
             "Z": "",
             "P": ""
         },
-        # Third row: (Outcome blank, Cohort = "Statistics") + stats
         {
             "Outcome": "",
             "Cohort": "<b>Statistics</b>",
@@ -150,7 +154,6 @@ for outcome_name in order:
 
 stacked_df = pd.DataFrame(all_rows)
 
-# --- Table styling ---
 def style_stacked_table(df, banded=True, bold_headers=True):
     css = """
     <style>
