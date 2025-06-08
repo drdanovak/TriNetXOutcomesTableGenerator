@@ -10,21 +10,32 @@ if not uploaded_file:
     st.stop()
 
 filename = uploaded_file.name.lower()
+
 if filename.endswith(".csv"):
-    df = pd.read_csv(uploaded_file, header=None)
+    # Try with skiprows=9 (for TriNetX) first; fallback to skiprows=0 for generic CSVs
+    uploaded_file.seek(0)
+    try:
+        df = pd.read_csv(uploaded_file, header=None, skiprows=9)
+        # Check if first row looks like headers (e.g., 'Cohort' in first cell)
+        if not str(df.iloc[0,0]).lower().startswith("cohort"):
+            raise ValueError("Headers not found in first row, trying fallback.")
+    except Exception:
+        uploaded_file.seek(0)
+        df = pd.read_csv(uploaded_file, header=None, skiprows=0)
 elif filename.endswith((".xls", ".xlsx")):
     df = pd.read_excel(uploaded_file, header=None)
 else:
     st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
     st.stop()
 
-# Basic assumption: first row is header, next two are cohort rows, optional: stat row(s)
+# At this point: 
+# Row 0: headers, Row 1: cohort1, Row 2: cohort2
+
 header = list(df.iloc[0])
 cohort1 = list(df.iloc[1])
 cohort2 = list(df.iloc[2])
 
-# (Optional) Manually input summary stats or extract/calculate as needed
-# Replace these with correct column indexes or automate extraction if preferred
+# Example summary stats (can be customized or made editable)
 stats = {
     "risk_diff": "5%",
     "risk_diff_ci": "(2%, 8%)",
