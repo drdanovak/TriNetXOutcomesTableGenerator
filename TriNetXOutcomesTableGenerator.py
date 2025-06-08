@@ -57,7 +57,7 @@ def extract_outcome_data(file):
         return None
 
     # --- Grab the cohort data ---
-    data = df.iloc[header_row:header_row+3]
+    data = df.iloc[header_row:header_row+3].copy()
     data.columns = list(data.iloc[0])
     data = data.iloc[1:].reset_index(drop=True)
     outcome_name = file.name.rsplit('.', 1)[0]
@@ -72,36 +72,63 @@ def extract_outcome_data(file):
     risk2 = c2.get(risk_col, "")
     cname1 = c1.get("Cohort Name", "")
     cname2 = c2.get("Cohort Name", "")
-    # --- Summary statistics parsing ---
-    risk_diff = ""
+
+    # Try to get summary stats as columns in the next row(s)
+    stats_row_idx = header_row + 3
+    stats_row = None
+    if stats_row_idx < len(df):
+        possible_row = df.iloc[stats_row_idx]
+        if any(str(col).lower().strip() in [
+            "risk difference", "odds ratio", "z", "p", "95 % ci lower", "95 % ci upper"
+        ] for col in possible_row):
+            # This is a header row for stats
+            stats_row = pd.Series({str(k): v for k, v in zip(possible_row, df.iloc[stats_row_idx+1])})
+
+    # Extract values for stats, trying both column and row parsing
+    def get_stat_val(keys, fallback=""):
+        # Try as column in stats_row first
+        if stats_row is not None:
+            for k in keys:
+                v = stats_row.get(k, "")
+                if pd.notna(v) and str(v).strip() not in ["", "nan"]:
+                    return v
+        # Fallback: parse as text in post-cohort lines (row-based)
+        for i in range(header_row+3, min(header_row+10, len(df))):
+            txt = " ".join(str(x) for x in df.iloc[i] if pd.notna(x))
+            for k in keys:
+                if k.lower() in txt.lower():
+                    # Try to extract value after ":"
+                    after = txt.lower().split(k.lower()+":")[-1].strip()
+                    if after:
+                        # stop at next space or parenthesis
+                        return after.split()[0].replace("(", "").replace(")", "")
+        return fallback
+
+    # Build CI string for risk diff and odds ratio
+    risk_diff = get_stat_val(["Risk Difference"])
+    risk_diff_ci_lower = get_stat_val(["95 % CI Lower", "Risk Difference Lower"])
+    risk_diff_ci_upper = get_stat_val(["95 % CI Upper", "Risk Difference Upper"])
     risk_diff_ci = ""
-    odds_ratio = ""
+    if risk_diff_ci_lower or risk_diff_ci_upper:
+        risk_diff_ci = f"({risk_diff_ci_lower}, {risk_diff_ci_upper})"
+    odds_ratio = get_stat_val(["Odds Ratio"])
+    odds_ratio_ci_lower = get_stat_val(["Odds Ratio Lower", "95 % CI Lower"])
+    odds_ratio_ci_upper = get_stat_val(["Odds Ratio Upper", "95 % CI Upper"])
     odds_ratio_ci = ""
-    z_score = ""
-    p_val = ""
-    for i in range(header_row+3, min(header_row+8, len(df))):
-        txt = " ".join(str(x) for x in df.iloc[i] if pd.notna(x))
-        if "risk difference" in txt.lower():
-            risk_diff = txt.split(":")[-1].strip()
-        if "95% ci" in txt.lower() and "risk" in txt.lower():
-            risk_diff_ci = txt.split(":")[-1].strip()
-        if "odds ratio" in txt.lower():
-            odds_ratio = txt.split(":")[-1].strip()
-        if "95% ci" in txt.lower() and "odds" in txt.lower():
-            odds_ratio_ci = txt.split(":")[-1].strip()
-        if "z=" in txt.lower():
-            z_score = txt.lower().split("z=")[-1].split()[0].replace(",", "")
-        if "p=" in txt.lower():
-            p_val = txt.lower().split("p=")[-1].split()[0].replace(",", "")
+    if odds_ratio_ci_lower or odds_ratio_ci_upper:
+        odds_ratio_ci = f"({odds_ratio_ci_lower}, {odds_ratio_ci_upper})"
+    z_score = get_stat_val(["z", "Z"])
+    p_val = get_stat_val(["p", "P"])
+
     stats_row = {
         "Outcome": "",
         "Cohort": "<b>Statistics</b>",
         "N": "",
         "Events": "",
-        "Risk": f"<div style='color:{stats_fg}'>Risk Diff: {risk_diff}<br><span style='font-size:0.93em'>95% CI: {risk_diff_ci}</span></div>",
-        "Stat": f"<div style='color:{stats_fg}'>Odds Ratio: {odds_ratio}<br><span style='font-size:0.93em'>95% CI: {odds_ratio_ci}</span></div>",
-        "Odds Ratio": f"<div style='color:{stats_fg}'>Z: {z_score}</div>",
-        "Z": f"<div style='color:{stats_fg}'>P: {p_val}</div>",
+        "Risk": f"Risk Diff: {risk_diff} <br><span style='font-size:0.93em'>95% CI: {risk_diff_ci}</span>",
+        "Stat": f"Odds Ratio: {odds_ratio} <br><span style='font-size:0.93em'>95% CI: {odds_ratio_ci}</span>",
+        "Odds Ratio": f"Z: {z_score}",
+        "Z": f"P: {p_val}",
         "P": ""
     }
     return [
