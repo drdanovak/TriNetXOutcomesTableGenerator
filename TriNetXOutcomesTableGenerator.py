@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(layout="wide")
-st.title("Journal-Style Outcomes Table Generator")
+st.title("Outcomes Table (Polished Publication Style)")
 
 uploaded_file = st.file_uploader(
     "📂 Upload your Outcomes Table (.csv, .xls, .xlsx)",
@@ -14,13 +14,13 @@ if not uploaded_file:
 
 filename = uploaded_file.name.lower()
 
-# --- Robustly load the table, skipping 9 rows for TriNetX CSVs ---
+# --- Robust load, skip TriNetX headers if present ---
 if filename.endswith(".csv"):
     uploaded_file.seek(0)
     try:
         df = pd.read_csv(uploaded_file, header=None, skiprows=9)
         if not str(df.iloc[0,1]).lower().startswith("cohort"):
-            raise ValueError("Header not found after skipping 9 rows.")
+            raise Exception("Header not found after skipping 9 rows.")
     except Exception:
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, header=None)
@@ -30,66 +30,91 @@ else:
     st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
     st.stop()
 
-# --- Standardize columns and rows based on your sample ---
-# Assign column names
+# --- Format data (assumes header, then two cohort rows, then stats below or added) ---
 columns = [
     "Cohort", "Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk Percentage"
 ]
-# We assume first row is header, next two rows are cohort data, and the risk is in the 5th column
 df.columns = columns
-df = df.iloc[1:3].reset_index(drop=True)  # keep only the two cohort rows
-
-# Optional: Ensure correct dtypes and formatting
+df = df.iloc[1:3].reset_index(drop=True)
 df["Cohort"] = [1, 2]
 df["Patients in Cohort"] = df["Patients in Cohort"].astype(int)
 df["Patients with Outcome"] = df["Patients with Outcome"].astype(int)
 df["Risk Percentage"] = pd.to_numeric(df["Risk Percentage"], errors='coerce').map("{:.9f}".format)
 
-# --- Append summary statistics as two custom rows ---
-stats_row1 = [
-    "Risk Difference: 5%",
-    "Odds Ratio: 1.42",
-    "Z=2.8",
-    "",
-    ""
-]
-stats_row2 = [
-    "95% CI: (2%, 8%)",
-    "95% CI: (1.08, 1.85)",
-    "P=0.005",
-    "",
-    ""
-]
+# --- Summary statistics (can be made editable if you wish) ---
+stats = {
+    "risk_diff": "5%",
+    "risk_diff_ci": "(2%, 8%)",
+    "risk_ratio": "1.42",
+    "risk_ratio_ci": "(1.10, 1.85)",
+    "odds_ratio": "1.42",
+    "odds_ratio_ci": "(1.08, 1.85)",
+    "z": "2.8",
+    "p": "0.005"
+}
 
-summary_df = pd.DataFrame([stats_row1, stats_row2], columns=columns)
-
-# --- Concatenate main table and summary rows ---
-output_df = pd.concat([df, summary_df], ignore_index=True)
-
-# --- Style table with Pandas Styler for simple output or custom HTML for advanced ---
-def make_html_table(df):
-    # Simple HTML table, add more styling as needed
-    css = """
+def nice_outcomes_table(df, stats):
+    # Custom HTML with distinct header, zebra striping, bold stat box
+    html = """
     <style>
-    .journal-table {border-collapse:collapse;width:100%;font-family:Arial,sans-serif;}
-    .journal-table th, .journal-table td {border:1px solid #2b4367;padding:8px;text-align:center;}
-    .journal-table th {background:#3d62a8;color:#fff;}
-    .journal-table tr.summary-row td {background:#f6f8fa;font-weight:bold;text-align:left;}
+    .nice-table {border-collapse:collapse;width:100%;font-family:Segoe UI,Arial,sans-serif;margin-top:24px;}
+    .nice-table th {background:#1d3557;color:#fff;padding:10px 8px;font-size:1.1em;border:1px solid #7da0c7;}
+    .nice-table td {border:1px solid #c4d2e7;padding:10px 8px;}
+    .nice-table tbody tr:nth-child(odd) {background:#f6fafd;}
+    .nice-table tbody tr:nth-child(even) {background:#e3ecf6;}
+    .stats-footer-row td {
+        background: #f9eab3 !important;
+        color: #353535;
+        font-weight: bold;
+        border-top: 2px solid #b49d4d;
+        font-size: 1.08em;
+        text-align: left;
+        padding-top:18px;
+    }
+    .stats-footer-row2 td {
+        background: #f9eab3 !important;
+        color: #353535;
+        font-size: 1.03em;
+        font-style: italic;
+        text-align: left;
+    }
     </style>
+    <table class="nice-table">
+      <thead>
+        <tr>
+          <th>Cohort</th>
+          <th>Cohort Name</th>
+          <th>Patients in Cohort</th>
+          <th>Patients with Outcome</th>
+          <th>Risk Percentage</th>
+        </tr>
+      </thead>
+      <tbody>
     """
-    html = css + "<table class='journal-table'>"
-    # Header
-    html += "<tr>" + "".join([f"<th>{c}</th>" for c in df.columns]) + "</tr>"
-    # Data rows
     for i, row in df.iterrows():
-        tr_class = 'summary-row' if i >= 2 else ''
-        html += f"<tr class='{tr_class}'>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
-    html += "</table>"
+        html += "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+
+    # Stats row 1: Risk diff, Odds Ratio, Z
+    html += f"""
+      <tr class="stats-footer-row">
+        <td colspan="2">Risk Difference: {stats['risk_diff']}</td>
+        <td>Odds Ratio: {stats['odds_ratio']}</td>
+        <td>Z={stats['z']}</td>
+        <td></td>
+      </tr>
+    """
+    # Stats row 2: CI for each stat, P-value
+    html += f"""
+      <tr class="stats-footer-row2">
+        <td colspan="2">95% CI: {stats['risk_diff_ci']}</td>
+        <td>95% CI: {stats['odds_ratio_ci']}</td>
+        <td>P={stats['p']}</td>
+        <td></td>
+      </tr>
+    """
+
+    html += "</tbody></table>"
     return html
 
-st.markdown("### Journal-Style Outcomes Table")
-st.markdown(make_html_table(output_df), unsafe_allow_html=True)
-
-# Optional: Download as CSV
-csv = output_df.to_csv(index=False)
-st.download_button("Download Table as CSV", csv, "journal_outcomes_table.csv", "text/csv")
+st.markdown("### Polished Journal-Style Outcomes Table")
+st.markdown(nice_outcomes_table(df, stats), unsafe_allow_html=True)
