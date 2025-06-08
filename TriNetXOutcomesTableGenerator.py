@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Multi-Outcome Table (Stacked Format)")
+st.title("TriNetX Multi-Outcome Table (Stacked & Customizable)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload multiple TriNetX outcome Excel files (.xls or .xlsx)",
@@ -13,6 +13,16 @@ if not uploaded_files:
     st.info("Upload at least two outcome Excel files exported from TriNetX.")
     st.stop()
 
+# --- UI: Formatting Options ---
+with st.sidebar:
+    st.header("Table Options")
+    banded = st.checkbox("Banded rows (zebra striping)", value=True)
+    bold_headers = st.checkbox("Bold column headers", value=True)
+    st.markdown("---")
+    st.markdown("#### Rearrangement")
+    st.caption("Move outcomes up or down in the final table.")
+
+# --- Data Extraction Function ---
 def extract_outcome_data(file):
     df = pd.read_excel(file, header=None)
     # Find header row
@@ -26,12 +36,9 @@ def extract_outcome_data(file):
     data = df.iloc[header_row:header_row+3]
     data.columns = list(data.iloc[0])
     data = data.iloc[1:].reset_index(drop=True)
-    # Get outcome name from filename
     outcome_name = file.name.rsplit('.', 1)[0]
-    # Cohort columns
     c1 = data.iloc[0]
     c2 = data.iloc[1]
-    # Risk, events, n
     risk_col = [col for col in data.columns if "risk" in str(col).lower()][0]
     n1 = c1.get("Patients in Cohort", "")
     n2 = c2.get("Patients in Cohort", "")
@@ -62,7 +69,6 @@ def extract_outcome_data(file):
             z_score = txt.lower().split("z=")[-1].split()[0].replace(",", "")
         if "p=" in txt.lower():
             p_val = txt.lower().split("p=")[-1].split()[0].replace(",", "")
-    # Compose group columns
     return [
         # First row: Outcome + Cohort 1 data
         {
@@ -102,29 +108,71 @@ def extract_outcome_data(file):
         }
     ]
 
-# Gather all rows, stacking per outcome
-all_rows = []
+# --- Extract and build all outcome blocks ---
+outcome_blocks = []
+outcome_names = []
 for file in uploaded_files:
-    rows = extract_outcome_data(file)
-    if rows:
-        all_rows.extend(rows)
+    block = extract_outcome_data(file)
+    if block:
+        outcome_blocks.append(block)
+        outcome_names.append(block[0]["Outcome"])
 
-# Convert to DataFrame
+# --- Outcome Reordering with Up/Down Buttons ---
+if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
+    st.session_state["order"] = outcome_names
+
+order = st.session_state["order"]
+
+def move_outcome(idx, direction):
+    new_order = order.copy()
+    if direction == "up" and idx > 0:
+        new_order[idx], new_order[idx-1] = new_order[idx-1], new_order[idx]
+    elif direction == "down" and idx < len(order)-1:
+        new_order[idx], new_order[idx+1] = new_order[idx+1], new_order[idx]
+    st.session_state["order"] = new_order
+
+if len(order) > 1:
+    st.write("**Change outcome order:**")
+    for idx, name in enumerate(order):
+        cols = st.columns([6,1,1])
+        cols[0].markdown(f"<span style='font-size:1.02em'>{name}</span>", unsafe_allow_html=True)
+        if cols[1].button("⬆️", key=f"up_{name}", disabled=(idx==0)):
+            move_outcome(idx, "up")
+        if cols[2].button("⬇️", key=f"down_{name}", disabled=(idx==len(order)-1)):
+            move_outcome(idx, "down")
+    st.markdown("---")
+
+# --- Build stacked table in chosen order ---
+all_rows = []
+for outcome_name in order:
+    idx = outcome_names.index(outcome_name)
+    all_rows.extend(outcome_blocks[idx])
+
 stacked_df = pd.DataFrame(all_rows)
 
-def style_stacked_table(df):
+# --- Table styling ---
+def style_stacked_table(df, banded=True, bold_headers=True):
     css = """
     <style>
     .stacked-table {border-collapse:collapse;width:100%;font-family:Segoe UI,Arial,sans-serif;font-size:0.97em;}
-    .stacked-table th {background:#17456d;color:#fff;padding:7px 6px;font-size:1em;border:1px solid #b8cbe9;}
-    .stacked-table td {border:1px solid #d4e1f2;padding:7px 6px;text-align:center;vertical-align:middle;}
-    .stacked-table tbody tr:nth-child(3n+1) {background:#e6f0fa;}
-    .stacked-table tbody tr:nth-child(3n+2) {background:#f5faff;}
-    .stacked-table tbody tr:nth-child(3n)   {background:#f9eab3;font-weight:600;}
-    .stacked-table td b {color:#764600;}
-    .stacked-table td span {color:#444;}
-    </style>
     """
+    if bold_headers:
+        css += ".stacked-table th {background:#17456d;color:#fff;padding:7px 6px;font-size:1em;border:1px solid #b8cbe9;font-weight:700;}"
+    else:
+        css += ".stacked-table th {background:#17456d;color:#fff;padding:7px 6px;font-size:1em;border:1px solid #b8cbe9;font-weight:400;}"
+    css += ".stacked-table td {border:1px solid #d4e1f2;padding:7px 6px;text-align:center;vertical-align:middle;}"
+    if banded:
+        css += """
+        .stacked-table tbody tr:nth-child(3n+1) {background:#e6f0fa;}
+        .stacked-table tbody tr:nth-child(3n+2) {background:#f5faff;}
+        .stacked-table tbody tr:nth-child(3n)   {background:#f9eab3;font-weight:600;}
+        """
+    else:
+        css += ".stacked-table tbody tr {background:#fff;}"
+        css += ".stacked-table tbody tr:nth-child(3n)   {background:#f9eab3;font-weight:600;}"
+    css += ".stacked-table td b {color:#764600;}"
+    css += ".stacked-table td span {color:#444;}"
+    css += "</style>"
     html = css + "<table class='stacked-table'><thead><tr>"
     for col in df.columns:
         html += f"<th>{col}</th>"
@@ -135,7 +183,7 @@ def style_stacked_table(df):
     return html
 
 st.markdown("### Stacked Outcomes Table")
-st.markdown(style_stacked_table(stacked_df), unsafe_allow_html=True)
+st.markdown(style_stacked_table(stacked_df, banded=banded, bold_headers=bold_headers), unsafe_allow_html=True)
 
 st.download_button(
     "Download Stacked Table as CSV",
