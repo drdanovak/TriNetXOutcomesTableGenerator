@@ -29,11 +29,19 @@ def extract_outcome_data(file):
     if file_ext in [".xls", ".xlsx"]:
         df = pd.read_excel(file, header=None)
     elif file_ext == ".csv":
+        # Try TriNetX (skiprows=9) logic first, then fallback
         file.seek(0)
-        df = pd.read_csv(file, header=None)
+        try:
+            df = pd.read_csv(file, header=None, skiprows=9)
+            if not any(str(cell).strip().lower().startswith("cohort") for cell in df.iloc[0]):
+                raise Exception("Header row not found after skipping 9 rows.")
+        except Exception:
+            file.seek(0)
+            df = pd.read_csv(file, header=None)
     else:
         return None  # skip unsupported file
-    # --- rest of your parsing logic here, unchanged ---
+
+    # --- Find header row with "Cohort" ---
     header_row = None
     for i, row in df.iterrows():
         if any(str(cell).strip().lower().startswith("cohort") for cell in row):
@@ -41,12 +49,15 @@ def extract_outcome_data(file):
             break
     if header_row is None:
         return None
+
+    # --- Grab the cohort data ---
     data = df.iloc[header_row:header_row+3]
     data.columns = list(data.iloc[0])
     data = data.iloc[1:].reset_index(drop=True)
     outcome_name = file.name.rsplit('.', 1)[0]
     c1 = data.iloc[0]
     c2 = data.iloc[1]
+    # Find the risk column (could be "Risk" or "Risk Percentage")
     risk_col = [col for col in data.columns if "risk" in str(col).lower()][0]
     n1 = c1.get("Patients in Cohort", "")
     n2 = c2.get("Patients in Cohort", "")
@@ -56,6 +67,7 @@ def extract_outcome_data(file):
     risk2 = c2.get(risk_col, "")
     cname1 = c1.get("Cohort Name", "")
     cname2 = c2.get("Cohort Name", "")
+    # --- Summary statistics parsing ---
     risk_diff = ""
     risk_diff_ci = ""
     odds_ratio = ""
