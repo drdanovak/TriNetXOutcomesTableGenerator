@@ -6,9 +6,28 @@ st.set_page_config(layout="wide")
 st.title("📈 TriNetX Outcomes Table Maker (Multi-File Journal Formatter)")
 
 st.markdown("""
-Upload multiple CSV files containing your outcomes data. The app will automatically combine them into a single, clean, journal-ready table. 
+Upload multiple CSV files containing your outcomes data. The app will automatically combine them into a single, clean, journal-ready table.
 You can adjust formatting and column selection to match your publication’s requirements.
 """)
+
+# --- Robust CSV Loader ---
+def robust_read_csv(uploaded_file):
+    # Try TriNetX-style file (skip 9 header rows)
+    uploaded_file.seek(0)
+    try:
+        df = pd.read_csv(uploaded_file, header=None, skiprows=9)
+        df.columns = df.iloc[0]
+        df = df[1:].reset_index(drop=True)
+        return df
+    except Exception:
+        pass
+    # Try as regular CSV
+    uploaded_file.seek(0)
+    try:
+        df = pd.read_csv(uploaded_file)
+        return df
+    except Exception as e:
+        raise e
 
 # --- 1. File Upload Section ---
 uploaded_files = st.file_uploader(
@@ -23,17 +42,7 @@ if not uploaded_files or len(uploaded_files) == 0:
 dfs = []
 for file in uploaded_files:
     try:
-        # Read header row automatically
-        sample = pd.read_csv(file, nrows=1)
-        # Try to find the row where the actual headers begin (sometimes TriNetX tables are offset)
-        file.seek(0)
-        df = pd.read_csv(file)
-        # If there are extra header/footer rows, try to auto-detect
-        if df.shape[0] > 2 and df.iloc[0].isnull().sum() < len(df.columns):
-            # Assume first row is header
-            df.columns = df.iloc[0]
-            df = df[1:]
-        df = df.reset_index(drop=True)
+        df = robust_read_csv(file)
         dfs.append(df)
     except Exception as e:
         st.warning(f"Could not read {file.name}: {e}")
