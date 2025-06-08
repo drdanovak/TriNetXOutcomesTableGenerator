@@ -2,98 +2,94 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(layout="wide")
-st.title("Outcomes Table Formatter (Journal Style)")
+st.title("Journal-Style Outcomes Table Generator")
 
-uploaded_file = st.file_uploader("📂 Upload your Outcomes Table (.csv, .xls, .xlsx)", type=["csv", "xls", "xlsx"])
+uploaded_file = st.file_uploader(
+    "📂 Upload your Outcomes Table (.csv, .xls, .xlsx)",
+    type=["csv", "xls", "xlsx"]
+)
 if not uploaded_file:
     st.info("Please upload your outcomes table file.")
     st.stop()
 
 filename = uploaded_file.name.lower()
 
+# --- Robustly load the table, skipping 9 rows for TriNetX CSVs ---
 if filename.endswith(".csv"):
-    # Try with skiprows=9 (for TriNetX) first; fallback to skiprows=0 for generic CSVs
     uploaded_file.seek(0)
     try:
         df = pd.read_csv(uploaded_file, header=None, skiprows=9)
-        # Check if first row looks like headers (e.g., 'Cohort' in first cell)
-        if not str(df.iloc[0,0]).lower().startswith("cohort"):
-            raise ValueError("Headers not found in first row, trying fallback.")
+        if not str(df.iloc[0,1]).lower().startswith("cohort"):
+            raise ValueError("Header not found after skipping 9 rows.")
     except Exception:
         uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, header=None, skiprows=0)
+        df = pd.read_csv(uploaded_file, header=None)
 elif filename.endswith((".xls", ".xlsx")):
     df = pd.read_excel(uploaded_file, header=None)
 else:
     st.error("Unsupported file type. Please upload a .csv, .xls, or .xlsx file.")
     st.stop()
 
-# At this point: 
-# Row 0: headers, Row 1: cohort1, Row 2: cohort2
+# --- Standardize columns and rows based on your sample ---
+# Assign column names
+columns = [
+    "Cohort", "Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk Percentage"
+]
+# We assume first row is header, next two rows are cohort data, and the risk is in the 5th column
+df.columns = columns
+df = df.iloc[1:3].reset_index(drop=True)  # keep only the two cohort rows
 
-header = list(df.iloc[0])
-cohort1 = list(df.iloc[1])
-cohort2 = list(df.iloc[2])
+# Optional: Ensure correct dtypes and formatting
+df["Cohort"] = [1, 2]
+df["Patients in Cohort"] = df["Patients in Cohort"].astype(int)
+df["Patients with Outcome"] = df["Patients with Outcome"].astype(int)
+df["Risk Percentage"] = pd.to_numeric(df["Risk Percentage"], errors='coerce').map("{:.9f}".format)
 
-# Example summary stats (can be customized or made editable)
-stats = {
-    "risk_diff": "5%",
-    "risk_diff_ci": "(2%, 8%)",
-    "risk_ratio": "1.33",
-    "risk_ratio_ci": "(1.10, 1.61)",
-    "odds_ratio": "1.42",
-    "odds_ratio_ci": "(1.08, 1.85)",
-    "z": "2.8",
-    "p": "0.005"
-}
+# --- Append summary statistics as two custom rows ---
+stats_row1 = [
+    "Risk Difference: 5%",
+    "Odds Ratio: 1.42",
+    "Z=2.8",
+    "",
+    ""
+]
+stats_row2 = [
+    "95% CI: (2%, 8%)",
+    "95% CI: (1.08, 1.85)",
+    "P=0.005",
+    "",
+    ""
+]
 
-def render_outcomes_summary_table(header, cohort1, cohort2, stats):
-    html = f"""
+summary_df = pd.DataFrame([stats_row1, stats_row2], columns=columns)
+
+# --- Concatenate main table and summary rows ---
+output_df = pd.concat([df, summary_df], ignore_index=True)
+
+# --- Style table with Pandas Styler for simple output or custom HTML for advanced ---
+def make_html_table(df):
+    # Simple HTML table, add more styling as needed
+    css = """
     <style>
-    .summary-table {{border-collapse:collapse;width:100%;font-family:Arial,sans-serif;}}
-    .summary-table th, .summary-table td {{border:1px solid #2b4367;padding:8px;text-align:center;}}
-    .summary-table th {{background:#3d62a8;color:#fff;}}
-    .summary-table tr.cohort-row {{background:#e9edf6;}}
-    .summary-table tr.stat-row td {{background:#f6f8fa;font-size:0.95em;text-align:left;}}
+    .journal-table {border-collapse:collapse;width:100%;font-family:Arial,sans-serif;}
+    .journal-table th, .journal-table td {border:1px solid #2b4367;padding:8px;text-align:center;}
+    .journal-table th {background:#3d62a8;color:#fff;}
+    .journal-table tr.summary-row td {background:#f6f8fa;font-weight:bold;text-align:left;}
     </style>
-    <table class="summary-table">
-      <tr>
-        <th>{header[0]}</th>
-        <th>{header[1]}</th>
-        <th>{header[2]}</th>
-        <th>{header[3]}</th>
-      </tr>
-      <tr class="cohort-row">
-        <td>{cohort1[0]}</td>
-        <td>{cohort1[1]}</td>
-        <td>{cohort1[2]}</td>
-        <td>{cohort1[3]}</td>
-      </tr>
-      <tr class="cohort-row">
-        <td>{cohort2[0]}</td>
-        <td>{cohort2[1]}</td>
-        <td>{cohort2[2]}</td>
-        <td>{cohort2[3]}</td>
-      </tr>
-      <tr class="stat-row">
-        <td colspan="2">
-          <b>Risk Difference:</b> {stats["risk_diff"]}<br>
-          <b>95% CI:</b> {stats["risk_diff_ci"]}<br>
-          <b>Risk Ratio:</b> {stats["risk_ratio"]}<br>
-          <b>95% CI:</b> {stats["risk_ratio_ci"]}
-        </td>
-        <td>
-          <b>Odds Ratio:</b> {stats["odds_ratio"]}<br>
-          <b>95% CI:</b> {stats["odds_ratio_ci"]}
-        </td>
-        <td>
-          <b>Z=</b>{stats["z"]}<br>
-          <b>P=</b>{stats["p"]}
-        </td>
-      </tr>
-    </table>
     """
+    html = css + "<table class='journal-table'>"
+    # Header
+    html += "<tr>" + "".join([f"<th>{c}</th>" for c in df.columns]) + "</tr>"
+    # Data rows
+    for i, row in df.iterrows():
+        tr_class = 'summary-row' if i >= 2 else ''
+        html += f"<tr class='{tr_class}'>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+    html += "</table>"
     return html
 
 st.markdown("### Journal-Style Outcomes Table")
-st.markdown(render_outcomes_summary_table(header, cohort1, cohort2, stats), unsafe_allow_html=True)
+st.markdown(make_html_table(output_df), unsafe_allow_html=True)
+
+# Optional: Download as CSV
+csv = output_df.to_csv(index=False)
+st.download_button("Download Table as CSV", csv, "journal_outcomes_table.csv", "text/csv")
