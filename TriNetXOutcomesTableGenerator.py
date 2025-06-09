@@ -56,7 +56,6 @@ with st.expander("Other Table Options (click to expand)", expanded=False):
     st.markdown("#### Rearrangement")
     st.caption("Drag outcome names to set display order below.")
 
-# Utility to safely extract a cell, blank if OOB or NA
 def get_cell(df, row, col):
     try:
         val = df.iat[row, col]
@@ -81,6 +80,10 @@ for file in uploaded_files:
             df = pd.read_csv(file, header=None, engine="python", error_bad_lines=False, dtype=str)
     else:
         continue
+
+    # Show the actual data for visual validation (debug step)
+    st.write(f"File: {file.name} preview (first 30 rows):")
+    st.dataframe(df.head(30))
 
     # Pad to 28 rows and 6 columns for absolute mapping
     min_rows = 28
