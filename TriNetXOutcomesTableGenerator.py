@@ -1,113 +1,118 @@
 import streamlit as st
-import pandas as pd
+
+# --- Robust TriNetX text parser ---
+def get_next_data_line(lines, start):
+    """Find the next line after 'start' that looks like a CSV (data, not header or blank)."""
+    for i in range(start, len(lines)):
+        line = lines[i].strip()
+        if line and line != '" "' and not line.startswith("Risk") and ',' in line:
+            return line
+    return None
+
+def parse_trinetx_outcomes(lines):
+    # Find cohort section
+    cohort1, cohort2 = None, None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("Cohort,Cohort Name"):
+            cohort1 = lines[i+1].strip().split(",")
+            cohort2 = lines[i+2].strip().split(",")
+            break
+    # Find stats
+    def find_stat(stat_name):
+        idx_list = [i for i, l in enumerate(lines) if stat_name in l]
+        return get_next_data_line(lines, idx_list[0]+1) if idx_list else None
+
+    risk_diff_line = find_stat("Risk Difference")
+    risk_diff = risk_diff_line.split(",") if risk_diff_line else ["", "", ""]
+
+    risk_ratio_line = find_stat("Risk Ratio")
+    risk_ratio = risk_ratio_line.split(",") if risk_ratio_line else ["", "", ""]
+
+    odds_ratio_line = find_stat("Odds Ratio")
+    odds_ratio = odds_ratio_line.split(",") if odds_ratio_line else ["", "", ""]
+
+    # Map cohort data (with fallback to blanks)
+    c1 = cohort1 if cohort1 else [""]*5
+    c2 = cohort2 if cohort2 else [""]*5
+
+    c1_name, c1_n, c1_outcome_n, c1_risk = c1[1:5]
+    c2_name, c2_n, c2_outcome_n, c2_risk = c2[1:5]
+
+    # Map stats
+    risk_diff_val, risk_diff_lo, risk_diff_hi = (risk_diff + ["", "", ""])[:3]
+    risk_ratio_val, risk_ratio_lo, risk_ratio_hi = (risk_ratio + ["", "", ""])[:3]
+    odds_ratio_val, odds_ratio_lo, odds_ratio_hi = (odds_ratio + ["", "", ""])[:3]
+
+    return {
+        "c1_name": c1_name, "c1_n": c1_n, "c1_outcome_n": c1_outcome_n, "c1_risk": c1_risk,
+        "c2_name": c2_name, "c2_n": c2_n, "c2_outcome_n": c2_outcome_n, "c2_risk": c2_risk,
+        "risk_diff_val": risk_diff_val, "risk_diff_lo": risk_diff_lo, "risk_diff_hi": risk_diff_hi,
+        "risk_ratio_val": risk_ratio_val, "risk_ratio_lo": risk_ratio_lo, "risk_ratio_hi": risk_ratio_hi,
+        "odds_ratio_val": odds_ratio_val, "odds_ratio_lo": odds_ratio_lo, "odds_ratio_hi": odds_ratio_hi
+    }
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Outcomes Table Generator (Custom Format)")
+st.title("🧮 TriNetX Outcomes Table Generator (Robust)")
 
-uploaded_file = st.file_uploader("Upload TriNetX Outcomes CSV (as downloaded)", type="csv")
+uploaded_file = st.file_uploader("Upload TriNetX Outcomes CSV (exported as-is from TriNetX)", type="csv")
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, header=None, dtype=str)
+    # Decode and split into lines
+    lines = uploaded_file.getvalue().decode("utf-8").splitlines()
+    outcome = parse_trinetx_outcomes(lines)
 
-    # Try-catch in case of file structure change
-    try:
-        cohort1 = df.iloc[5,0].split(",")
-        cohort2 = df.iloc[6,0].split(",")
-        risk_diff = df.iloc[9,0].split(",")
-        risk_ratio = df.iloc[12,0].split(",")
-        odds_ratio = df.iloc[15,0].split(",")
+    # Outcome name (editable)
+    outcome_name = st.text_input("Outcome Name (edit if desired):", value="Outcome")
 
-        c1_name, c1_n, c1_outcome_n, c1_risk = cohort1[1], cohort1[2], cohort1[3], cohort1[4]
-        c2_name, c2_n, c2_outcome_n, c2_risk = cohort2[1], cohort2[2], cohort2[3], cohort2[4]
+    # Display table (pretty, journal-ready)
+    st.markdown(f"### {outcome_name} Outcome Table")
 
-        risk_diff_val, risk_diff_lo, risk_diff_hi = risk_diff[0], risk_diff[1], risk_diff[2]
-        risk_ratio_val, risk_ratio_lo, risk_ratio_hi = risk_ratio[0], risk_ratio[1], risk_ratio[2]
-        odds_ratio_val, odds_ratio_lo, odds_ratio_hi = odds_ratio[0], odds_ratio[1], odds_ratio[2]
-
-        p_val = ""  # Not present in your rows, you can add logic if available
-
-        # Build cohort table
-        cohort_table = pd.DataFrame([
-            [c1_name, c1_n, c1_outcome_n, c1_risk],
-            [c2_name, c2_n, c2_outcome_n, c2_risk]
-        ], columns=["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk"])
-
-        st.markdown("### Cohort Results")
-        st.dataframe(cohort_table, hide_index=True, use_container_width=True)
-
-        # Build stats table
-        stats_table = pd.DataFrame([
-            ["Risk Difference", risk_diff_val, f"({risk_diff_lo}, {risk_diff_hi})", ""],
-            ["Risk Ratio", risk_ratio_val, f"({risk_ratio_lo}, {risk_ratio_hi})", ""],
-            ["Odds Ratio", odds_ratio_val, f"({odds_ratio_lo}, {odds_ratio_hi})", ""],
-        ], columns=["Statistic", "Value", "95% CI", "p-value"])
-
-        st.markdown("### Statistics")
-        st.dataframe(stats_table, hide_index=True, use_container_width=True)
-
-        # Journal style HTML (copy-paste)
-        st.markdown("**Formatted Table (Copy for Manuscript)**")
-        html_table = f"""
-        <style>
-        .outcome-table {{
-            font-size: 16px; border-collapse: collapse; width: 100%;
-        }}
-        .outcome-table th, .outcome-table td {{
-            border: 1px solid #999; padding: 6px 12px; text-align: center;
-        }}
-        .outcome-table th {{
-            background: #f7f7f7;
-        }}
-        </style>
-        <table class="outcome-table">
-        <tr>
-            <th>Cohort Name</th>
-            <th>Patients in Cohort</th>
-            <th>Patients with Outcome</th>
-            <th>Risk</th>
-        </tr>
-        <tr>
-            <td>{c1_name}</td>
-            <td>{c1_n}</td>
-            <td>{c1_outcome_n}</td>
-            <td>{c1_risk}</td>
-        </tr>
-        <tr>
-            <td>{c2_name}</td>
-            <td>{c2_n}</td>
-            <td>{c2_outcome_n}</td>
-            <td>{c2_risk}</td>
-        </tr>
-        <tr><td colspan="4" style="background:#efefef;"></td></tr>
-        <tr>
-            <th>Statistic</th>
-            <th>Value</th>
-            <th>95% CI</th>
-            <th>p-value</th>
-        </tr>
-        <tr>
-            <td>Risk Difference</td>
-            <td>{risk_diff_val}</td>
-            <td>({risk_diff_lo}, {risk_diff_hi})</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>Risk Ratio</td>
-            <td>{risk_ratio_val}</td>
-            <td>({risk_ratio_lo}, {risk_ratio_hi})</td>
-            <td></td>
-        </tr>
-        <tr>
-            <td>Odds Ratio</td>
-            <td>{odds_ratio_val}</td>
-            <td>({odds_ratio_lo}, {odds_ratio_hi})</td>
-            <td></td>
-        </tr>
+    # Cohort results (pretty table)
+    st.markdown(
+        f"""
+        <table style="font-size:16px; border-collapse:collapse; width:100%; margin-bottom:16px;">
+          <tr style="background:#f7f7f7;">
+            <th>Cohort Name</th><th>Patients in Cohort</th><th>Patients with Outcome</th><th>Risk</th>
+          </tr>
+          <tr>
+            <td>{outcome['c1_name']}</td><td>{outcome['c1_n']}</td><td>{outcome['c1_outcome_n']}</td><td>{outcome['c1_risk']}</td>
+          </tr>
+          <tr>
+            <td>{outcome['c2_name']}</td><td>{outcome['c2_n']}</td><td>{outcome['c2_outcome_n']}</td><td>{outcome['c2_risk']}</td>
+          </tr>
         </table>
-        """
-        st.markdown(html_table, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True
+    )
 
-    except Exception as e:
-        st.error(f"File structure did not match expected TriNetX export: {e}")
+    # Summary statistics
+    st.markdown(
+        f"""
+        <table style="font-size:16px; border-collapse:collapse; width:100%;">
+          <tr style="background:#f7f7f7;">
+            <th>Statistic</th><th>Value</th><th>95% CI</th>
+          </tr>
+          <tr>
+            <td>Risk Difference</td>
+            <td>{outcome['risk_diff_val']}</td>
+            <td>({outcome['risk_diff_lo']}, {outcome['risk_diff_hi']})</td>
+          </tr>
+          <tr>
+            <td>Risk Ratio</td>
+            <td>{outcome['risk_ratio_val']}</td>
+            <td>({outcome['risk_ratio_lo']}, {outcome['risk_ratio_hi']})</td>
+          </tr>
+          <tr>
+            <td>Odds Ratio</td>
+            <td>{outcome['odds_ratio_val']}</td>
+            <td>({outcome['odds_ratio_lo']}, {outcome['odds_ratio_hi']})</td>
+          </tr>
+        </table>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.info("Copy the above table for your manuscript or poster. If a statistic is missing, check your TriNetX export file for that section.")
 
 else:
-    st.info("Upload a TriNetX outcomes CSV file to get started.")
+    st.info("Upload a TriNetX CSV export to generate your formatted outcome table.")
+
