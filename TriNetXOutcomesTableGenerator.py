@@ -1,118 +1,194 @@
 import streamlit as st
-
-# --- Robust TriNetX text parser ---
-def get_next_data_line(lines, start):
-    """Find the next line after 'start' that looks like a CSV (data, not header or blank)."""
-    for i in range(start, len(lines)):
-        line = lines[i].strip()
-        if line and line != '" "' and not line.startswith("Risk") and ',' in line:
-            return line
-    return None
-
-def parse_trinetx_outcomes(lines):
-    # Find cohort section
-    cohort1, cohort2 = None, None
-    for i, line in enumerate(lines):
-        if line.strip().startswith("Cohort,Cohort Name"):
-            cohort1 = lines[i+1].strip().split(",")
-            cohort2 = lines[i+2].strip().split(",")
-            break
-    # Find stats
-    def find_stat(stat_name):
-        idx_list = [i for i, l in enumerate(lines) if stat_name in l]
-        return get_next_data_line(lines, idx_list[0]+1) if idx_list else None
-
-    risk_diff_line = find_stat("Risk Difference")
-    risk_diff = risk_diff_line.split(",") if risk_diff_line else ["", "", ""]
-
-    risk_ratio_line = find_stat("Risk Ratio")
-    risk_ratio = risk_ratio_line.split(",") if risk_ratio_line else ["", "", ""]
-
-    odds_ratio_line = find_stat("Odds Ratio")
-    odds_ratio = odds_ratio_line.split(",") if odds_ratio_line else ["", "", ""]
-
-    # Map cohort data (with fallback to blanks)
-    c1 = cohort1 if cohort1 else [""]*5
-    c2 = cohort2 if cohort2 else [""]*5
-
-    c1_name, c1_n, c1_outcome_n, c1_risk = c1[1:5]
-    c2_name, c2_n, c2_outcome_n, c2_risk = c2[1:5]
-
-    # Map stats
-    risk_diff_val, risk_diff_lo, risk_diff_hi = (risk_diff + ["", "", ""])[:3]
-    risk_ratio_val, risk_ratio_lo, risk_ratio_hi = (risk_ratio + ["", "", ""])[:3]
-    odds_ratio_val, odds_ratio_lo, odds_ratio_hi = (odds_ratio + ["", "", ""])[:3]
-
-    return {
-        "c1_name": c1_name, "c1_n": c1_n, "c1_outcome_n": c1_outcome_n, "c1_risk": c1_risk,
-        "c2_name": c2_name, "c2_n": c2_n, "c2_outcome_n": c2_outcome_n, "c2_risk": c2_risk,
-        "risk_diff_val": risk_diff_val, "risk_diff_lo": risk_diff_lo, "risk_diff_hi": risk_diff_hi,
-        "risk_ratio_val": risk_ratio_val, "risk_ratio_lo": risk_ratio_lo, "risk_ratio_hi": risk_ratio_hi,
-        "odds_ratio_val": odds_ratio_val, "odds_ratio_lo": odds_ratio_lo, "odds_ratio_hi": odds_ratio_hi
-    }
+import pandas as pd
+import os
+import numpy as np
 
 st.set_page_config(layout="wide")
-st.title("🧮 TriNetX Outcomes Table Generator (Robust)")
+st.title("TriNetX Outcomes Table (Absolute Cell Mapping)")
 
-uploaded_file = st.file_uploader("Upload TriNetX Outcomes CSV (exported as-is from TriNetX)", type="csv")
-if uploaded_file:
-    # Decode and split into lines
-    lines = uploaded_file.getvalue().decode("utf-8").splitlines()
-    outcome = parse_trinetx_outcomes(lines)
+uploaded_files = st.file_uploader(
+    "📂 Upload TriNetX outcome files (.csv, .xls, or .xlsx)",
+    type=["csv", "xls", "xlsx"], accept_multiple_files=True
+)
 
-    # Outcome name (editable)
-    outcome_name = st.text_input("Outcome Name (edit if desired):", value="Outcome")
+if not uploaded_files:
+    st.info("Upload at least one TriNetX outcome file exported from TriNetX.")
+    st.stop()
 
-    # Display table (pretty, journal-ready)
-    st.markdown(f"### {outcome_name} Outcome Table")
+JOURNAL_STYLES = {
+    "AMA": dict(
+        header_bg="#1b365d", header_fg="#ffffff",
+        stats_bg="#e6ecf2", stats_fg="#243952",
+        font="Arial, sans-serif", border="1px solid #b6c5db"
+    ),
+    "APA": dict(
+        header_bg="#002b36", header_fg="#fff",
+        stats_bg="#e1f0ee", stats_fg="#175c4c",
+        font="Times New Roman, Times, serif", border="1px solid #aab8c2"
+    ),
+    "NEJM": dict(
+        header_bg="#d6001c", header_fg="#fff",
+        stats_bg="#fbeaea", stats_fg="#990000",
+        font="Georgia, serif", border="1px solid #e2bfc1"
+    ),
+}
 
-    # Cohort results (pretty table)
-    st.markdown(
-        f"""
-        <table style="font-size:16px; border-collapse:collapse; width:100%; margin-bottom:16px;">
-          <tr style="background:#f7f7f7;">
-            <th>Cohort Name</th><th>Patients in Cohort</th><th>Patients with Outcome</th><th>Risk</th>
-          </tr>
-          <tr>
-            <td>{outcome['c1_name']}</td><td>{outcome['c1_n']}</td><td>{outcome['c1_outcome_n']}</td><td>{outcome['c1_risk']}</td>
-          </tr>
-          <tr>
-            <td>{outcome['c2_name']}</td><td>{outcome['c2_n']}</td><td>{outcome['c2_outcome_n']}</td><td>{outcome['c2_risk']}</td>
-          </tr>
-        </table>
-        """,
-        unsafe_allow_html=True
+with st.expander("Journal Table Style (click to expand)", expanded=False):
+    journal_style = st.radio(
+        "Select Table Style (overrides colors below):",
+        list(JOURNAL_STYLES.keys()),
+        index=0
     )
 
-    # Summary statistics
-    st.markdown(
-        f"""
-        <table style="font-size:16px; border-collapse:collapse; width:100%;">
-          <tr style="background:#f7f7f7;">
-            <th>Statistic</th><th>Value</th><th>95% CI</th>
-          </tr>
-          <tr>
-            <td>Risk Difference</td>
-            <td>{outcome['risk_diff_val']}</td>
-            <td>({outcome['risk_diff_lo']}, {outcome['risk_diff_hi']})</td>
-          </tr>
-          <tr>
-            <td>Risk Ratio</td>
-            <td>{outcome['risk_ratio_val']}</td>
-            <td>({outcome['risk_ratio_lo']}, {outcome['risk_ratio_hi']})</td>
-          </tr>
-          <tr>
-            <td>Odds Ratio</td>
-            <td>{outcome['odds_ratio_val']}</td>
-            <td>({outcome['odds_ratio_lo']}, {outcome['odds_ratio_hi']})</td>
-          </tr>
-        </table>
-        """,
-        unsafe_allow_html=True
-    )
+defaults = JOURNAL_STYLES[journal_style]
 
-    st.info("Copy the above table for your manuscript or poster. If a statistic is missing, check your TriNetX export file for that section.")
+with st.expander("Table Colors (click to expand)", expanded=False):
+    header_bg = st.color_picker("Header background", defaults['header_bg'])
+    header_fg = st.color_picker("Header text", defaults['header_fg'])
+    stats_bg = st.color_picker("Statistics row background", defaults['stats_bg'])
+    stats_fg = st.color_picker("Statistics row text", defaults['stats_fg'])
+    font_family = defaults['font']
+    border_style = defaults['border']
 
-else:
-    st.info("Upload a TriNetX CSV export to generate your formatted outcome table.")
+with st.expander("Other Table Options (click to expand)", expanded=False):
+    bold_headers = st.checkbox("Bold column headers", value=True)
+    st.markdown("---")
+    st.markdown("#### Rearrangement")
+    st.caption("Drag outcome names to set display order below.")
 
+# Utility to safely extract a cell, blank if OOB or NA
+def get_cell(df, row, col):
+    try:
+        val = df.iat[row, col]
+        if pd.isna(val):
+            return ""
+        return str(val)
+    except Exception:
+        return ""
+
+outcome_tables = []
+outcome_names = []
+for file in uploaded_files:
+    file_ext = os.path.splitext(file.name)[-1].lower()
+    if file_ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(file, header=None, dtype=str)
+    elif file_ext == ".csv":
+        file.seek(0)
+        try:
+            df = pd.read_csv(file, header=None, engine="python", on_bad_lines="skip", dtype=str)
+        except Exception:
+            file.seek(0)
+            df = pd.read_csv(file, header=None, engine="python", error_bad_lines=False, dtype=str)
+    else:
+        continue
+
+    # Pad to 28 rows and 6 columns for absolute mapping
+    min_rows = 28
+    min_cols = 6
+    if df.shape[0] < min_rows:
+        df = pd.concat([df, pd.DataFrame(np.full((min_rows - df.shape[0], df.shape[1]), "", dtype=object))], ignore_index=True)
+    if df.shape[1] < min_cols:
+        df = pd.concat([df, pd.DataFrame(np.full((df.shape[0], min_cols - df.shape[1]), "", dtype=object))], axis=1)
+
+    default_name = file.name.rsplit('.', 1)[0]
+    with st.expander(f"Customize Outcome Name for '{default_name}'", expanded=False):
+        user_outcome = st.text_input("Enter Outcome Name", default_name, key=f"outcome_{default_name}")
+
+    outcome_names.append(user_outcome)
+
+    # --- Absolute mapping per your design ---
+    block = [
+        [user_outcome, "", "", "", "", ""],  # Outcome name row
+        ["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk", "", ""],
+        [get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4), "", ""],  # B11-E11
+        [get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4), "", ""],  # B12-E12
+        ["", "", "", "", "", ""],  # spacer
+        ["Risk Difference", "", "Risk Ratio", get_cell(df,21,0), "Odds Ratio", get_cell(df,26,0)],
+        [
+            get_cell(df,16,0), get_cell(df,16,1),
+            "95% CI", f"({get_cell(df,21,1)}, {get_cell(df,21,2)})",
+            "95% CI", f"({get_cell(df,26,1)}, {get_cell(df,26,2)})"
+        ],
+        [
+            "95% CI", f"({get_cell(df,16,1)}, {get_cell(df,16,2)})", "", "",
+            "p", get_cell(df,16,4)
+        ]
+    ]
+    outcome_tables.append(block)
+
+if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
+    st.session_state["order"] = outcome_names.copy()
+order = st.multiselect(
+    "Drag outcomes below to reorder for display:",
+    options=outcome_names,
+    default=st.session_state["order"],
+    key="outcome_order"
+)
+if order != st.session_state.get("order", []):
+    st.session_state["order"] = order
+
+def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, font_family, border_style):
+    css = f"""
+    <style>
+    .custom-table {{
+        border-collapse:collapse;width:90%;font-family:{font_family};font-size:1em;margin-bottom:2em;
+    }}
+    .custom-table th, .custom-table td {{
+        border:{border_style};
+        padding:7px 6px;
+        text-align:center;
+    }}
+    .custom-table tr.header-row th {{
+        background:{header_bg};
+        color:{header_fg};
+        {"font-weight:700;" if bold_headers else ""}
+        font-size:1em;
+    }}
+    .custom-table tr.stats-row td {{
+        background:{stats_bg};
+        color:{stats_fg};
+        font-weight:600;
+    }}
+    </style>
+    """
+    html = css + "<table class='custom-table'><tbody>"
+    for i, row in enumerate(block):
+        row_class = ""
+        if i == 1:
+            row_class = "header-row"
+            tag = "th"
+        elif i > 4:
+            row_class = "stats-row"
+            tag = "td"
+        else:
+            tag = "td"
+        html += f"<tr class='{row_class}'>" + "".join([f"<{tag}>{cell}</{tag}>" for cell in row]) + "</tr>"
+    html += "</tbody></table>"
+    return html
+
+st.markdown("### Custom Outcomes Table(s)")
+for name in st.session_state["order"]:
+    idx = outcome_names.index(name)
+    block = outcome_tables[idx]
+    st.markdown(style_block(
+        block,
+        bold_headers=bold_headers,
+        header_bg=header_bg,
+        header_fg=header_fg,
+        stats_bg=stats_bg,
+        stats_fg=stats_fg,
+        font_family=font_family,
+        border_style=border_style
+    ), unsafe_allow_html=True)
+
+import io
+csv_buffer = io.StringIO()
+for idx, name in enumerate(st.session_state["order"]):
+    pd.DataFrame(outcome_tables[idx]).to_csv(csv_buffer, index=False, header=False)
+    csv_buffer.write("\n\n")
+st.download_button(
+    "Download All Outcomes as CSV",
+    csv_buffer.getvalue(),
+    "all_outcomes_tables.csv",
+    "text/csv"
+)
