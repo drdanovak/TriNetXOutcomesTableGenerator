@@ -19,51 +19,35 @@ if not uploaded_files:
 st.sidebar.header("Table Options")
 
 with st.sidebar.expander("Color and Style Options", expanded=False):
-    journal_style = st.selectbox(
-        "Journal Table Style",
-        ["AMA", "APA", "NEJM"],
-        index=0
-    )
-    grayscale = st.checkbox("Grayscale style", value=False)
+    palette = st.selectbox("Color Palette Preset", ["AMA", "APA", "NEJM", "Nature", "Monochrome"], index=0)
+    palette_dict = {
+        "AMA": {"header_bg":"#1b365d", "header_fg":"#fff", "stats_bg":"#e6ecf2", "stats_fg":"#243952"},
+        "APA": {"header_bg":"#002b36", "header_fg":"#fff", "stats_bg":"#e1f0ee", "stats_fg":"#175c4c"},
+        "NEJM": {"header_bg":"#d6001c", "header_fg":"#fff", "stats_bg":"#fbeaea", "stats_fg":"#990000"},
+        "Nature": {"header_bg":"#053061", "header_fg":"#fff", "stats_bg":"#f4f7fa", "stats_fg":"#28527a"},
+        "Monochrome": {"header_bg":"#646464", "header_fg":"#fff", "stats_bg":"#eee", "stats_fg":"#222"}
+    }
+    chosen_palette = palette_dict[palette]
+    header_bg = st.color_picker("Header background", chosen_palette['header_bg'])
+    header_fg = st.color_picker("Header text", chosen_palette['header_fg'])
+    stats_bg = st.color_picker("Statistics row background", chosen_palette['stats_bg'])
+    stats_fg = st.color_picker("Statistics row text", chosen_palette['stats_fg'])
     font_family = st.selectbox("Font", ["Arial, sans-serif", "Times New Roman, Times, serif", "Georgia, serif"], index=0)
     border_style = st.selectbox("Border Style", ["1px solid #b6c5db", "1px solid #aab8c2", "1px solid #e2bfc1", "1px solid #555"], index=0)
     spacing = st.slider("Cell vertical spacing (px)", 4, 20, 8, 1)
-
     horizontal_align = st.selectbox("Horizontal Align", ["center", "left", "right"], index=0)
     vertical_align = st.selectbox("Vertical Align", ["middle", "top", "bottom"], index=0)
-
-    JOURNAL_STYLES = {
-        "AMA": dict(
-            header_bg="#1b365d", header_fg="#ffffff",
-            stats_bg="#e6ecf2", stats_fg="#243952",
-        ),
-        "APA": dict(
-            header_bg="#002b36", header_fg="#fff",
-            stats_bg="#e1f0ee", stats_fg="#175c4c",
-        ),
-        "NEJM": dict(
-            header_bg="#d6001c", header_fg="#fff",
-            stats_bg="#fbeaea", stats_fg="#990000",
-        ),
-        "GRAYSCALE": dict(
-            header_bg="#646464", header_fg="#fff",
-            stats_bg="#eee", stats_fg="#222",
-        )
-    }
-    defaults = JOURNAL_STYLES[journal_style]
-    if grayscale:
-        color_override = JOURNAL_STYLES["GRAYSCALE"]
-        header_bg = st.color_picker("Header background", color_override['header_bg'])
-        header_fg = st.color_picker("Header text", color_override['header_fg'])
-        stats_bg = st.color_picker("Statistics row background", color_override['stats_bg'])
-        stats_fg = st.color_picker("Statistics row text", color_override['stats_fg'])
-    else:
-        header_bg = st.color_picker("Header background", defaults['header_bg'])
-        header_fg = st.color_picker("Header text", defaults['header_fg'])
-        stats_bg = st.color_picker("Statistics row background", defaults['stats_bg'])
-        stats_fg = st.color_picker("Statistics row text", defaults['stats_fg'])
-
     bold_headers = st.checkbox("Bold column headers", value=True)
+
+# ---- Column Visibility Toggles ----
+with st.sidebar.expander("Column Visibility", expanded=True):
+    show_cohort = st.checkbox("Show Cohort column", value=True)
+    show_patients = st.checkbox("Show Patients column", value=True)
+    show_outcome = st.checkbox("Show Patients with Outcome column", value=True)
+    show_risk = st.checkbox("Show Risk column", value=True)
+    show_risk_diff = st.checkbox("Show Risk Difference", value=True)
+    show_risk_ratio = st.checkbox("Show Risk Ratio", value=True)
+    show_odds_ratio = st.checkbox("Show Odds Ratio", value=True)
 
 decimals = st.sidebar.number_input("Decimal places for risks/ratios", min_value=0, max_value=6, value=3, step=1)
 show_percent = st.sidebar.checkbox("Show risk as percent (%)", value=False)
@@ -72,11 +56,16 @@ show_percent = st.sidebar.checkbox("Show risk as percent (%)", value=False)
 with st.sidebar.expander("File and Table Adjustments", expanded=False):
     outcome_name_map = {}
     file_labels = []
+    cohort_labels_1 = {}
+    cohort_labels_2 = {}
     for idx, file in enumerate(uploaded_files):
         default_name = file.name.rsplit('.', 1)[0]
         user_outcome = st.text_input(f"Outcome name for '{default_name}'", default_name, key=f"outcome_{default_name}")
         outcome_name_map[file.name] = user_outcome
         file_labels.append(user_outcome)
+        cohort_labels_1[file.name] = st.text_input(f"Cohort 1 label for '{default_name}'", "Cohort 1", key=f"c1_{default_name}")
+        cohort_labels_2[file.name] = st.text_input(f"Cohort 2 label for '{default_name}'", "Cohort 2", key=f"c2_{default_name}")
+
     st.markdown("---")
     order_indices = st.multiselect(
         "Select and order outcomes for display:",
@@ -84,7 +73,6 @@ with st.sidebar.expander("File and Table Adjustments", expanded=False):
         format_func=lambda i: file_labels[i],
         default=list(range(len(file_labels)))
     )
-    # order_indices gives the user-ordered indices of file_labels
     order = [file_labels[i] for i in order_indices] if order_indices else file_labels
 
 def robust_csv_to_df(uploaded_file):
@@ -127,7 +115,7 @@ def fmt_p(val):
         if str(val).strip() == "":
             return ""
         return f"p={val}"
-    
+
 def get_cell(df, row, col):
     try:
         val = df.iat[row, col]
@@ -139,7 +127,15 @@ def get_cell(df, row, col):
 
 outcome_names = []
 outcome_tables = []
-diagnostics = []
+
+# Determine columns to show/hide (and their positions)
+base_headers = ["Cohort", "Patients", "Patients with Outcome", "Risk"]
+stat_rows = [
+    ("Risk Difference", show_risk_diff),
+    ("Risk Ratio", show_risk_ratio),
+    ("Odds Ratio", show_odds_ratio)
+]
+base_visible = [show_cohort, show_patients, show_outcome, show_risk]
 
 for file in uploaded_files:
     df = robust_csv_to_df(file)
@@ -153,15 +149,17 @@ for file in uploaded_files:
         df = pd.concat([df, pad_df], axis=1)
 
     name = outcome_name_map[file.name]
+    c1label = cohort_labels_1[file.name]
+    c2label = cohort_labels_2[file.name]
 
     cohort_1 = [
-        get_cell(df,10,1), 
+        c1label,
         fmt_num(get_cell(df,10,2), integer=True),
         fmt_num(get_cell(df,10,3), integer=True),
         fmt_num(get_cell(df,10,4), decimals, show_percent)
     ]
     cohort_2 = [
-        get_cell(df,11,1), 
+        c2label,
         fmt_num(get_cell(df,11,2), integer=True),
         fmt_num(get_cell(df,11,3), integer=True),
         fmt_num(get_cell(df,11,4), decimals, show_percent)
@@ -174,19 +172,28 @@ for file in uploaded_files:
     odds_ratio = fmt_num(get_cell(df,26,0), decimals, False)
     odds_ratio_ci = f"({fmt_num(get_cell(df,26,1),decimals,False)}, {fmt_num(get_cell(df,26,2),decimals,False)})"
 
-    block = [
-        [f"<b>{name}</b>", "", "", ""],
-        ["Cohort", "Patients", "Patients with Outcome", "Risk"],
-        cohort_1,
-        cohort_2,
-        # Visually thick divider row:
-        [f"<div style='border-bottom: 4px solid #444; height: 0.1em;'></div>", "", "", ""],
-        ["Risk Difference", risk_diff, f"95% CI: {risk_diff_ci}", risk_diff_p],
-        ["Risk Ratio", risk_ratio, f"95% CI: {risk_ratio_ci}", ""],
-        ["Odds Ratio", odds_ratio, f"95% CI: {odds_ratio_ci}", ""],
-    ]
+    rows = []
+    # Table title
+    rows.append([f"<b>{name}</b>"] + [""]*(sum(base_visible)-1))
+    # Headers
+    headers = [h for h, v in zip(base_headers, base_visible) if v]
+    rows.append(headers)
+    # Cohort rows
+    if show_cohort or show_patients or show_outcome or show_risk:
+        rows.append([cell for cell, v in zip(cohort_1, base_visible) if v])
+        rows.append([cell for cell, v in zip(cohort_2, base_visible) if v])
+    # Divider
+    rows.append([f"<div style='border-bottom: 4px solid #444; height: 0.1em;'></div>"] + [""]*(sum(base_visible)-1))
+    # Stats rows
+    if show_risk_diff:
+        rows.append(["Risk Difference", risk_diff, f"95% CI: {risk_diff_ci}", risk_diff_p][:sum(base_visible)])
+    if show_risk_ratio:
+        rows.append(["Risk Ratio", risk_ratio, f"95% CI: {risk_ratio_ci}", ""][:sum(base_visible)])
+    if show_odds_ratio:
+        rows.append(["Odds Ratio", odds_ratio, f"95% CI: {odds_ratio_ci}", ""][:sum(base_visible)])
+
     outcome_names.append(name)
-    outcome_tables.append(block)
+    outcome_tables.append(rows)
 
 def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, font_family, border_style, spacing, h_align, v_align):
     css = f"""
@@ -228,9 +235,8 @@ def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, f
     """
     html = css + "<table class='compact-table'>"
     for i, row in enumerate(block):
-        # Use a special class for the divider row
         if i == 4:
-            html += "<tr class='divider-row'>" + "".join([f"<td colspan='4'>{cell}</td>" if idx == 0 else "" for idx, cell in enumerate(row)]) + "</tr>"
+            html += "<tr class='divider-row'>" + "".join([f"<td colspan='{len(row)}'>{cell}</td>" if idx == 0 else "" for idx, cell in enumerate(row)]) + "</tr>"
         elif i >= 5:
             html += "<tr class='stats-row'>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
         else:
