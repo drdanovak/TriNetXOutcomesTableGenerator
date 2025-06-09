@@ -15,6 +15,13 @@ if not uploaded_files:
     st.info("Upload at least one TriNetX outcome file exported from TriNetX.")
     st.stop()
 
+# ---- Toolbar/Sidebar Options ----
+st.sidebar.header("Table Options")
+journal_style = st.sidebar.selectbox(
+    "Journal Table Style",
+    ["AMA", "APA", "NEJM"],
+    index=0
+)
 JOURNAL_STYLES = {
     "AMA": dict(
         header_bg="#1b365d", header_fg="#ffffff",
@@ -32,29 +39,19 @@ JOURNAL_STYLES = {
         font="Georgia, serif", border="1px solid #e2bfc1"
     ),
 }
-
-with st.expander("Journal Table Style (click to expand)", expanded=False):
-    journal_style = st.radio(
-        "Select Table Style (overrides colors below):",
-        list(JOURNAL_STYLES.keys()),
-        index=0
-    )
-
 defaults = JOURNAL_STYLES[journal_style]
 
-with st.expander("Table Colors (click to expand)", expanded=False):
-    header_bg = st.color_picker("Header background", defaults['header_bg'])
-    header_fg = st.color_picker("Header text", defaults['header_fg'])
-    stats_bg = st.color_picker("Statistics row background", defaults['stats_bg'])
-    stats_fg = st.color_picker("Statistics row text", defaults['stats_fg'])
-    font_family = defaults['font']
-    border_style = defaults['border']
+header_bg = st.sidebar.color_picker("Header background", defaults['header_bg'])
+header_fg = st.sidebar.color_picker("Header text", defaults['header_fg'])
+stats_bg = st.sidebar.color_picker("Statistics row background", defaults['stats_bg'])
+stats_fg = st.sidebar.color_picker("Statistics row text", defaults['stats_fg'])
+font_family = defaults['font']
+border_style = defaults['border']
+bold_headers = st.sidebar.checkbox("Bold column headers", value=True)
 
-with st.expander("Other Table Options (click to expand)", expanded=False):
-    bold_headers = st.checkbox("Bold column headers", value=True)
-    st.markdown("---")
-    st.markdown("#### Rearrangement")
-    st.caption("Drag outcome names to set display order below.")
+outcome_names = []
+outcome_tables = []
+outcome_name_map = {}
 
 def robust_csv_to_df(uploaded_file):
     raw = uploaded_file.read().decode('utf-8').splitlines()
@@ -80,11 +77,28 @@ def get_cell(df, row, col):
     except Exception:
         return ""
 
-outcome_tables = []
-outcome_names = []
+# ---- Sidebar: File Adjustment and Order ----
+with st.sidebar.expander("File & Table Adjustments", expanded=True):
+    name_inputs = {}
+    for file in uploaded_files:
+        default_name = file.name.rsplit('.', 1)[0]
+        user_outcome = st.text_input(f"Outcome name for '{default_name}'", default_name, key=f"outcome_{default_name}")
+        outcome_name_map[file.name] = user_outcome
+
+    st.markdown("---")
+    # You can't reorder file_uploader files directly, but you can let users specify the outcome order
+    order = st.multiselect(
+        "Display order (drag to rearrange):",
+        options=[outcome_name_map[file.name] for file in uploaded_files],
+        default=[outcome_name_map[file.name] for file in uploaded_files],
+        key="outcome_order"
+    )
+
+# ---- Process and Display Each Table ----
+diagnostics = []
 for file in uploaded_files:
     df = robust_csv_to_df(file)
-    # Ensure DataFrame is big enough for absolute cell mapping
+    # Padding to avoid index errors
     min_rows = 28
     min_cols = 6
     if df.shape[0] < min_rows:
@@ -94,100 +108,83 @@ for file in uploaded_files:
         pad_df = pd.DataFrame([[''] * add_cols for _ in range(df.shape[0])])
         df = pd.concat([df, pad_df], axis=1)
 
-    default_name = file.name.rsplit('.', 1)[0]
-    with st.expander(f"Customize Outcome Name for '{default_name}'", expanded=False):
-        user_outcome = st.text_input("Enter Outcome Name", default_name, key=f"outcome_{default_name}")
-    outcome_names.append(user_outcome)
+    name = outcome_name_map[file.name]
 
-    # Compact, readable table structure
-    cohort_1 = [
-        get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4)
-    ]  # B11-E11
-    cohort_2 = [
-        get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4)
-    ]  # B12-E12
-    # Risk Difference
-    risk_diff = get_cell(df,16,0)
-    risk_diff_ci = f"({get_cell(df,16,1)}, {get_cell(df,16,2)})"
-    risk_diff_p = get_cell(df,16,4)
-    # Risk Ratio
-    risk_ratio = get_cell(df,21,0)
-    risk_ratio_ci = f"({get_cell(df,21,1)}, {get_cell(df,21,2)})"
-    # Odds Ratio
-    odds_ratio = get_cell(df,26,0)
-    odds_ratio_ci = f"({get_cell(df,26,1)}, {get_cell(df,26,2)})"
+    # --- Extract values with full diagnostic printout ---
+    diagnostics.append({
+        "file": file.name,
+        "Cohort 1 Name (B11)": get_cell(df,10,1),
+        "Cohort 1 Patients (C11)": get_cell(df,10,2),
+        "Cohort 1 With Outcome (D11)": get_cell(df,10,3),
+        "Cohort 1 Risk (E11)": get_cell(df,10,4),
+        "Cohort 2 Name (B12)": get_cell(df,11,1),
+        "Cohort 2 Patients (C12)": get_cell(df,11,2),
+        "Cohort 2 With Outcome (D12)": get_cell(df,11,3),
+        "Cohort 2 Risk (E12)": get_cell(df,11,4),
+        "Risk Diff (A17)": get_cell(df,16,0),
+        "Risk Diff Lower (B17)": get_cell(df,16,1),
+        "Risk Diff Upper (C17)": get_cell(df,16,2),
+        "Risk Diff p (E17)": get_cell(df,16,4),
+        "Risk Ratio (A22)": get_cell(df,21,0),
+        "Risk Ratio Lower (B22)": get_cell(df,21,1),
+        "Risk Ratio Upper (C22)": get_cell(df,21,2),
+        "Odds Ratio (A27)": get_cell(df,26,0),
+        "Odds Ratio Lower (B27)": get_cell(df,26,1),
+        "Odds Ratio Upper (C27)": get_cell(df,26,2),
+    })
 
     block = [
-        [f"Outcome: {user_outcome}", "", "", "", ""],
-        ["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk", ""],
-        cohort_1 + [""],
-        cohort_2 + [""],
-        ["", "", "", "", ""],
-        ["Risk Difference", risk_diff, f"95% CI: {risk_diff_ci}", f"p: {risk_diff_p}", ""],
-        ["Risk Ratio", risk_ratio, f"95% CI: {risk_ratio_ci}", "", ""],
-        ["Odds Ratio", odds_ratio, f"95% CI: {odds_ratio_ci}", "", ""],
+        [f"<b>Outcome:</b> {name}", "", "", ""],
+        ["<b>Cohort</b>", "<b>Patients</b>", "<b>With Outcome</b>", "<b>Risk</b>"],
+        [get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4)],
+        [get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4)],
+        ["<b>Risk Difference</b>", get_cell(df,16,0), f"95% CI: ({get_cell(df,16,1)}, {get_cell(df,16,2)})", f"p: {get_cell(df,16,4)}"],
+        ["<b>Risk Ratio</b>", get_cell(df,21,0), f"95% CI: ({get_cell(df,21,1)}, {get_cell(df,21,2)})", ""],
+        ["<b>Odds Ratio</b>", get_cell(df,26,0), f"95% CI: ({get_cell(df,26,1)}, {get_cell(df,26,2)})", ""],
     ]
+    outcome_names.append(name)
     outcome_tables.append(block)
-
-if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
-    st.session_state["order"] = outcome_names.copy()
-order = st.multiselect(
-    "Drag outcomes below to reorder for display:",
-    options=outcome_names,
-    default=st.session_state["order"],
-    key="outcome_order"
-)
-if order != st.session_state.get("order", []):
-    st.session_state["order"] = order
 
 def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, font_family, border_style):
     css = f"""
     <style>
-    .custom-table {{
-        border-collapse:collapse;width:80%;font-family:{font_family};font-size:1em;margin-bottom:2em;
+    .compact-table {{
+        border-collapse:collapse;width:70%;font-family:{font_family};font-size:1.04em;margin-bottom:2em;
     }}
-    .custom-table th, .custom-table td {{
+    .compact-table th, .compact-table td {{
         border:{border_style};
-        padding:7px 6px;
+        padding:5px 6px;
         text-align:center;
+        vertical-align:middle;
     }}
-    .custom-table thead th {{
+    .compact-table tr:nth-child(1) td {{
         background:{header_bg};
         color:{header_fg};
         {"font-weight:700;" if bold_headers else ""}
-        font-size:1.05em;
+        font-size:1.08em;
+        text-align:left;
     }}
-    .custom-table tr.stats-row td {{
+    .compact-table tr:nth-child(2) td {{
+        background:{header_bg};
+        color:{header_fg};
+        {"font-weight:700;" if bold_headers else ""}
+    }}
+    .compact-table tr:nth-child(n+5) td {{
         background:{stats_bg};
         color:{stats_fg};
         font-weight:600;
     }}
-    .custom-table tr.outcome-row td {{
-        font-weight:600;
-        font-size:1.1em;
-        text-align:left;
-    }}
     </style>
     """
-    html = css + "<table class='custom-table'><tbody>"
+    html = css + "<table class='compact-table'>"
     for i, row in enumerate(block):
-        row_class = ""
-        if i == 0:
-            row_class = "outcome-row"
-        elif i == 1:
-            tag = "th"
-            row_class = ""
-            html += f"<tr class='{row_class}'>" + "".join([f"<{tag}>{cell}</{tag}>" for cell in row]) + "</tr>"
-            continue
-        elif i >= 5:
-            row_class = "stats-row"
-        tag = "td"
-        html += f"<tr class='{row_class}'>" + "".join([f"<{tag}>{cell}</{tag}>" for cell in row]) + "</tr>"
-    html += "</tbody></table>"
+        html += "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+    html += "</table>"
     return html
 
-st.markdown("### Custom Compact Outcomes Table(s)")
-for name in st.session_state["order"]:
+st.markdown("### Compact Outcomes Table(s)")
+# Only show selected order
+for name in order:
     idx = outcome_names.index(name)
     block = outcome_tables[idx]
     st.markdown(style_block(
@@ -201,9 +198,10 @@ for name in st.session_state["order"]:
         border_style=border_style
     ), unsafe_allow_html=True)
 
+# Optional: Download CSV
 csv_buffer = io.StringIO()
-for idx, name in enumerate(st.session_state["order"]):
-    pd.DataFrame(outcome_tables[idx]).to_csv(csv_buffer, index=False, header=False)
+for idx, name in enumerate(order):
+    pd.DataFrame(outcome_tables[outcome_names.index(name)]).to_csv(csv_buffer, index=False, header=False)
     csv_buffer.write("\n\n")
 st.download_button(
     "Download All Outcomes as CSV",
@@ -211,3 +209,7 @@ st.download_button(
     "all_outcomes_tables.csv",
     "text/csv"
 )
+
+# ---- Diagnostics Table (For Debugging, remove/comment for final) ----
+with st.expander("Show Diagnostics", expanded=False):
+    st.write(pd.DataFrame(diagnostics))
