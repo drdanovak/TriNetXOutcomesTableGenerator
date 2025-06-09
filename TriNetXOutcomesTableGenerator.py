@@ -18,6 +18,9 @@ if not uploaded_files:
 # ---- Sidebar/Toolbar Options ----
 st.sidebar.header("Table Options")
 
+decimals = st.sidebar.number_input("Decimal places for risks/ratios", min_value=0, max_value=6, value=3, step=1)
+show_percent = st.sidebar.checkbox("Show risk as percent (%)", value=False)
+
 with st.sidebar.expander("Color and Style Options", expanded=False):
     palette = st.selectbox("Color Palette Preset", ["AMA", "APA", "NEJM", "Nature", "Monochrome"], index=0)
     palette_dict = {
@@ -40,7 +43,7 @@ with st.sidebar.expander("Color and Style Options", expanded=False):
     bold_headers = st.checkbox("Bold column headers", value=True)
 
 # ---- Column Visibility Toggles ----
-with st.sidebar.expander("Column Visibility", expanded=True):
+with st.sidebar.expander("Column Visibility", expanded=False):
     show_cohort = st.checkbox("Show Cohort column", value=True)
     show_patients = st.checkbox("Show Patients column", value=True)
     show_outcome = st.checkbox("Show Patients with Outcome column", value=True)
@@ -48,9 +51,6 @@ with st.sidebar.expander("Column Visibility", expanded=True):
     show_risk_diff = st.checkbox("Show Risk Difference", value=True)
     show_risk_ratio = st.checkbox("Show Risk Ratio", value=True)
     show_odds_ratio = st.checkbox("Show Odds Ratio", value=True)
-
-decimals = st.sidebar.number_input("Decimal places for risks/ratios", min_value=0, max_value=6, value=3, step=1)
-show_percent = st.sidebar.checkbox("Show risk as percent (%)", value=False)
 
 # ---- File and Table Adjustments ----
 with st.sidebar.expander("File and Table Adjustments", expanded=False):
