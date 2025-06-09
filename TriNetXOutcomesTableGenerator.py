@@ -66,17 +66,18 @@ with st.expander("Other Table Options (click to expand)", expanded=False):
     st.markdown("#### Rearrangement")
     st.caption("Drag outcome names to set display order below.")
 
-def safe_get_row(df, idx):
-    try:
-        return df.iloc[idx]
-    except Exception:
-        return pd.Series([""]*max(df.shape[1], 5))
-
-def safe_get_val(row, col):
-    try:
-        return row[col] if col < len(row) else ""
-    except Exception:
-        return ""
+# ---- Utility for safe extraction ----
+def safe_row(df, idx):
+    # Returns the row if present, else ["", "", "", "", ""]
+    if idx < len(df):
+        row = df.iloc[idx]
+        # Pad row if not enough columns
+        row = list(row.values)
+        while len(row) < 5:
+            row.append("")
+        return row
+    else:
+        return ["", "", "", "", ""]
 
 def extract_outcome_data(file):
     file_ext = os.path.splitext(file.name)[-1].lower()
@@ -93,38 +94,33 @@ def extract_outcome_data(file):
         return None
 
     outcome_name = file.name.rsplit('.', 1)[0]
-    # Defensive: If file is way too short, just skip
-    if df.shape[0] < 12:
-        st.warning(f"File {file.name}: File has too few rows. Skipping.")
-        return None
 
-    # Cohort rows (row 11 and 12)
-    row_c1 = safe_get_row(df, 10)
-    row_c2 = safe_get_row(df, 11)
-    # Risk Diff, Risk Ratio, Odds Ratio
-    row_riskdiff = safe_get_row(df, 16)
-    row_riskratio = safe_get_row(df, 21)
-    row_oddsratio = safe_get_row(df, 26)
+    # Always map exact rows/columns, fill with blanks if missing
+    row_c1 = safe_row(df, 10)        # A11-E11
+    row_c2 = safe_row(df, 11)        # A12-E12
+    row_riskdiff = safe_row(df, 16)  # A17-E17
+    row_riskratio = safe_row(df, 21) # A22-C22 (map up to 3 columns)
+    row_oddsratio = safe_row(df, 26) # A27-C27 (map up to 3 columns)
 
     stats_row = {
         "Outcome": "",
         "Cohort": "<b>Statistics</b>",
         "N": "",
         "Events": "",
-        "Risk": f"Risk Diff: {safe_get_val(row_riskdiff,0)}<br><span style='font-size:0.93em'>95% CI: ({safe_get_val(row_riskdiff,1)}, {safe_get_val(row_riskdiff,2)})</span>",
-        "Stat": f"Risk Ratio: {safe_get_val(row_riskratio,0)}<br><span style='font-size:0.93em'>95% CI: ({safe_get_val(row_riskratio,1)}, {safe_get_val(row_riskratio,2)})</span>",
-        "Odds Ratio": f"Odds Ratio: {safe_get_val(row_oddsratio,0)}<br><span style='font-size:0.93em'>95% CI: ({safe_get_val(row_oddsratio,1)}, {safe_get_val(row_oddsratio,2)})</span>",
-        "Z": f"z: {safe_get_val(row_riskdiff,3)}",
-        "P": f"p: {safe_get_val(row_riskdiff,4)}"
+        "Risk": f"Risk Diff: {row_riskdiff[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskdiff[1]}, {row_riskdiff[2]})</span>",
+        "Stat": f"Risk Ratio: {row_riskratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskratio[1]}, {row_riskratio[2]})</span>",
+        "Odds Ratio": f"Odds Ratio: {row_oddsratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_oddsratio[1]}, {row_oddsratio[2]})</span>",
+        "Z": f"z: {row_riskdiff[3]}",
+        "P": f"p: {row_riskdiff[4]}"
     }
 
     return [
         {
             "Outcome": outcome_name,
-            "Cohort": safe_get_val(row_c1, 0),
-            "N": safe_get_val(row_c1, 2),
-            "Events": safe_get_val(row_c1, 3),
-            "Risk": safe_get_val(row_c1, 4),
+            "Cohort": row_c1[0],
+            "N": row_c1[2],
+            "Events": row_c1[3],
+            "Risk": row_c1[4],
             "Stat": "",
             "Odds Ratio": "",
             "Z": "",
@@ -132,10 +128,10 @@ def extract_outcome_data(file):
         },
         {
             "Outcome": "",
-            "Cohort": safe_get_val(row_c2, 0),
-            "N": safe_get_val(row_c2, 2),
-            "Events": safe_get_val(row_c2, 3),
-            "Risk": safe_get_val(row_c2, 4),
+            "Cohort": row_c2[0],
+            "N": row_c2[2],
+            "Events": row_c2[3],
+            "Risk": row_c2[4],
             "Stat": "",
             "Odds Ratio": "",
             "Z": "",
