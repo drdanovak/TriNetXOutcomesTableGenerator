@@ -72,58 +72,64 @@ def extract_outcome_data(file):
         df = pd.read_excel(file, header=None)
     elif file_ext == ".csv":
         file.seek(0)
-        df = pd.read_csv(file, header=None)
+        try:
+            df = pd.read_csv(file, header=None, engine="python", on_bad_lines="skip")
+        except Exception:
+            file.seek(0)
+            df = pd.read_csv(file, header=None, engine="python", error_bad_lines=False)
     else:
         return None
 
     outcome_name = file.name.rsplit('.', 1)[0]
-    # Cohort data: rows 11 & 12
-    row_c1 = df.iloc[10]
-    row_c2 = df.iloc[11]
-    # Risk Diff row 17
-    row_riskdiff = df.iloc[16]
-    # Risk Ratio row 22
-    row_riskratio = df.iloc[21]
-    # Odds Ratio row 27
-    row_oddsratio = df.iloc[26]
 
-    stats_row = {
-        "Outcome": "",
-        "Cohort": "<b>Statistics</b>",
-        "N": "",
-        "Events": "",
-        "Risk": f"Risk Diff: {row_riskdiff[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskdiff[1]}, {row_riskdiff[2]})</span>",
-        "Stat": f"Risk Ratio: {row_riskratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskratio[1]}, {row_riskratio[2]})</span>",
-        "Odds Ratio": f"Odds Ratio: {row_oddsratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_oddsratio[1]}, {row_oddsratio[2]})</span>",
-        "Z": f"z: {row_riskdiff[3]}",
-        "P": f"p: {row_riskdiff[4]}"
-    }
+    # Try/except to avoid IndexErrors for incomplete/ragged files
+    try:
+        row_c1 = df.iloc[10]  # A11, B11, C11, D11, E11
+        row_c2 = df.iloc[11]  # A12, B12, C12, D12, E12
+        row_riskdiff = df.iloc[16]  # A17, B17, C17, D17, E17
+        row_riskratio = df.iloc[21]  # A22, B22, C22
+        row_oddsratio = df.iloc[26]  # A27, B27, C27
 
-    return [
-        {
-            "Outcome": outcome_name,
-            "Cohort": row_c1[0],
-            "N": row_c1[2],
-            "Events": row_c1[3],
-            "Risk": row_c1[4],
-            "Stat": "",
-            "Odds Ratio": "",
-            "Z": "",
-            "P": ""
-        },
-        {
+        stats_row = {
             "Outcome": "",
-            "Cohort": row_c2[0],
-            "N": row_c2[2],
-            "Events": row_c2[3],
-            "Risk": row_c2[4],
-            "Stat": "",
-            "Odds Ratio": "",
-            "Z": "",
-            "P": ""
-        },
-        stats_row
-    ]
+            "Cohort": "<b>Statistics</b>",
+            "N": "",
+            "Events": "",
+            "Risk": f"Risk Diff: {row_riskdiff[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskdiff[1]}, {row_riskdiff[2]})</span>",
+            "Stat": f"Risk Ratio: {row_riskratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskratio[1]}, {row_riskratio[2]})</span>",
+            "Odds Ratio": f"Odds Ratio: {row_oddsratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_oddsratio[1]}, {row_oddsratio[2]})</span>",
+            "Z": f"z: {row_riskdiff[3]}",
+            "P": f"p: {row_riskdiff[4]}"
+        }
+
+        return [
+            {
+                "Outcome": outcome_name,
+                "Cohort": row_c1[0],
+                "N": row_c1[2],
+                "Events": row_c1[3],
+                "Risk": row_c1[4],
+                "Stat": "",
+                "Odds Ratio": "",
+                "Z": "",
+                "P": ""
+            },
+            {
+                "Outcome": "",
+                "Cohort": row_c2[0],
+                "N": row_c2[2],
+                "Events": row_c2[3],
+                "Risk": row_c2[4],
+                "Stat": "",
+                "Odds Ratio": "",
+                "Z": "",
+                "P": ""
+            },
+            stats_row
+        ]
+    except Exception as e:
+        st.warning(f"File {file.name}: Could not extract all rows as expected (likely file format mismatch). Skipping this file. Error: {e}")
+        return None
 
 # --- Extract and build all outcome blocks ---
 outcome_blocks = []
