@@ -266,8 +266,3 @@ st.download_button(
     "all_outcomes_tables.csv",
     "text/csv"
 )
-
-# Diagnostics (optional)
-with st.expander("Show Diagnostics", expanded=False):
-    st.write(outcome_names)
-    st.write(order)
