@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Outcomes Table (Header-Relative Mapping)")
+st.title("TriNetX Outcomes Table (Absolute Cell Mapping)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload TriNetX outcome files (.csv, .xls, or .xlsx)",
@@ -56,6 +56,7 @@ with st.expander("Other Table Options (click to expand)", expanded=False):
     st.markdown("#### Rearrangement")
     st.caption("Drag outcome names to set display order below.")
 
+# Utility to safely extract a cell, blank if OOB or NA
 def get_cell(df, row, col):
     try:
         val = df.iat[row, col]
@@ -64,13 +65,6 @@ def get_cell(df, row, col):
         return str(val)
     except Exception:
         return ""
-
-def find_header_row(df):
-    for idx in range(min(len(df), 40)):  # only check the first 40 rows
-        row_vals = df.iloc[idx].astype(str).str.lower()
-        if any("cohort name" in str(cell).strip().lower() for cell in row_vals):
-            return idx
-    return None
 
 outcome_tables = []
 outcome_names = []
@@ -88,17 +82,13 @@ for file in uploaded_files:
     else:
         continue
 
-    # Pad for safety
-    if df.shape[0] < 40:
-        df = pd.concat([df, pd.DataFrame(np.full((40-df.shape[0], df.shape[1]), "", dtype=object))], ignore_index=True)
-    if df.shape[1] < 10:
-        df = pd.concat([df, pd.DataFrame(np.full((df.shape[0], 10-df.shape[1]), "", dtype=object))], axis=1)
-
-    # --- Robust: find the "Cohort Name" header row ---
-    header_row = find_header_row(df)
-    if header_row is None:
-        st.warning(f"File {file.name}: Could not find 'Cohort Name' header row.")
-        continue
+    # Pad to 28 rows and 6 columns for absolute mapping
+    min_rows = 28
+    min_cols = 6
+    if df.shape[0] < min_rows:
+        df = pd.concat([df, pd.DataFrame(np.full((min_rows - df.shape[0], df.shape[1]), "", dtype=object))], ignore_index=True)
+    if df.shape[1] < min_cols:
+        df = pd.concat([df, pd.DataFrame(np.full((df.shape[0], min_cols - df.shape[1]), "", dtype=object))], axis=1)
 
     default_name = file.name.rsplit('.', 1)[0]
     with st.expander(f"Customize Outcome Name for '{default_name}'", expanded=False):
@@ -106,42 +96,26 @@ for file in uploaded_files:
 
     outcome_names.append(user_outcome)
 
-    # Offsets relative to header_row:
-    idx_c1 = header_row + 1
-    idx_c2 = header_row + 2
-    idx_riskdiff = header_row + 7
-    idx_riskratio = header_row + 12
-    idx_oddsratio = header_row + 17
-
-    # Build table according to your drawing
+    # --- Absolute mapping per your design ---
     block = [
-        [user_outcome, "", "", "", "", ""],
-        [
-            get_cell(df, header_row, 1),  # "Cohort Name"
-            get_cell(df, header_row, 2),  # "Patients in Cohort"
-            get_cell(df, header_row, 3),  # "Patients with Outcome"
-            get_cell(df, header_row, 4),  # "Risk"
-            "", ""
-        ],
-        [get_cell(df, idx_c1, 1), get_cell(df, idx_c1, 2), get_cell(df, idx_c1, 3), get_cell(df, idx_c1, 4), "", ""],
-        [get_cell(df, idx_c2, 1), get_cell(df, idx_c2, 2), get_cell(df, idx_c2, 3), get_cell(df, idx_c2, 4), "", ""],
+        [user_outcome, "", "", "", "", ""],  # Outcome name row
+        ["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk", "", ""],
+        [get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4), "", ""],  # B11-E11
+        [get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4), "", ""],  # B12-E12
         ["", "", "", "", "", ""],  # spacer
+        ["Risk Difference", "", "Risk Ratio", get_cell(df,21,0), "Odds Ratio", get_cell(df,26,0)],
         [
-            "Risk Difference", "", "Risk Ratio", get_cell(df, idx_riskratio, 0), "Odds Ratio", get_cell(df, idx_oddsratio, 0)
+            get_cell(df,16,0), get_cell(df,16,1),
+            "95% CI", f"({get_cell(df,21,1)}, {get_cell(df,21,2)})",
+            "95% CI", f"({get_cell(df,26,1)}, {get_cell(df,26,2)})"
         ],
         [
-            get_cell(df, idx_riskdiff, 0), get_cell(df, idx_riskdiff, 1),
-            "95% CI", f"({get_cell(df, idx_riskratio, 1)}, {get_cell(df, idx_riskratio, 2)})",
-            "95% CI", f"({get_cell(df, idx_oddsratio, 1)}, {get_cell(df, idx_oddsratio, 2)})"
-        ],
-        [
-            "95% CI", f"({get_cell(df, idx_riskdiff, 1)}, {get_cell(df, idx_riskdiff, 2)})", "", "",
-            "p", get_cell(df, idx_riskdiff, 4)
+            "95% CI", f"({get_cell(df,16,1)}, {get_cell(df,16,2)})", "", "",
+            "p", get_cell(df,16,4)
         ]
     ]
     outcome_tables.append(block)
 
-# --- Ordering UI ---
 if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
     st.session_state["order"] = outcome_names.copy()
 order = st.multiselect(
@@ -207,7 +181,6 @@ for name in st.session_state["order"]:
         border_style=border_style
     ), unsafe_allow_html=True)
 
-# CSV export for all outcomes (one after another)
 import io
 csv_buffer = io.StringIO()
 for idx, name in enumerate(st.session_state["order"]):
