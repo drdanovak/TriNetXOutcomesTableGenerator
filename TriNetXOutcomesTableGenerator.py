@@ -3,9 +3,6 @@ import pandas as pd
 import numpy as np
 import io
 
-# Import Sortable for drag-and-drop, make sure to install 'streamlit-sortables'
-from streamlit_sortables import sort_items
-
 st.set_page_config(layout="wide")
 st.title("TriNetX Compact Table Generator")
 
@@ -49,7 +46,7 @@ with st.sidebar.expander("Color and Style Options", expanded=False):
             stats_bg="#fbeaea", stats_fg="#990000",
         ),
         "GRAYSCALE": dict(
-            header_bg="#646464", header_fg="#fff",
+            header_bg="#222", header_fg="#fff",
             stats_bg="#eee", stats_fg="#222",
         )
     }
@@ -74,16 +71,21 @@ show_percent = st.sidebar.checkbox("Show risk as percent (%)", value=False)
 # ---- File and Table Adjustments ----
 with st.sidebar.expander("File and Table Adjustments", expanded=False):
     outcome_name_map = {}
-    for file in uploaded_files:
+    file_labels = []
+    for idx, file in enumerate(uploaded_files):
         default_name = file.name.rsplit('.', 1)[0]
         user_outcome = st.text_input(f"Outcome name for '{default_name}'", default_name, key=f"outcome_{default_name}")
         outcome_name_map[file.name] = user_outcome
-
+        file_labels.append(user_outcome)
     st.markdown("---")
-    # Drag-and-drop ordering using streamlit-sortables
-    item_labels = [outcome_name_map[file.name] for file in uploaded_files]
-    sorted_items = sort_items(item_labels, direction="vertical", label="Drag to reorder outcome tables")
-    st.session_state["order"] = sorted_items
+    order_indices = st.multiselect(
+        "Select and order outcomes for display:",
+        options=list(range(len(file_labels))),
+        format_func=lambda i: file_labels[i],
+        default=list(range(len(file_labels)))
+    )
+    # order_indices gives the user-ordered indices of file_labels
+    order = [file_labels[i] for i in order_indices] if order_indices else file_labels
 
 def robust_csv_to_df(uploaded_file):
     raw = uploaded_file.read().decode('utf-8').splitlines()
@@ -177,6 +179,8 @@ for file in uploaded_files:
         ["Cohort", "Patients", "Patients with Outcome", "Risk"],
         cohort_1,
         cohort_2,
+        # Visually thick divider row:
+        [f"<div style='border-bottom: 4px solid #444; height: 0.1em;'></div>", "", "", ""],
         ["Risk Difference", risk_diff, f"95% CI: {risk_diff_ci}", risk_diff_p],
         ["Risk Ratio", risk_ratio, f"95% CI: {risk_ratio_ci}", ""],
         ["Odds Ratio", odds_ratio, f"95% CI: {odds_ratio_ci}", ""],
@@ -208,7 +212,14 @@ def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, f
         color:{header_fg};
         {"font-weight:700;" if bold_headers else ""}
     }}
-    .compact-table tr:nth-child(n+5) td {{
+    .compact-table tr.divider-row td {{
+        border-bottom: 4px solid #444 !important;
+        height: 0.2em !important;
+        background: #fff !important;
+        font-size: 1px !important;
+        padding: 0 !important;
+    }}
+    .compact-table tr.stats-row td {{
         background:{stats_bg};
         color:{stats_fg};
         font-weight:600;
@@ -217,12 +228,15 @@ def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, f
     """
     html = css + "<table class='compact-table'>"
     for i, row in enumerate(block):
-        html += "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+        # Use a special class for the divider row
+        if i == 4:
+            html += "<tr class='divider-row'>" + "".join([f"<td colspan='4'>{cell}</td>" if idx == 0 else "" for idx, cell in enumerate(row)]) + "</tr>"
+        elif i >= 5:
+            html += "<tr class='stats-row'>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
+        else:
+            html += "<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>"
     html += "</table>"
     return html
-
-# Use drag-and-drop sort order if available, else preserve upload order
-order = st.session_state.get("order", outcome_names)
 
 st.markdown("### Compact Outcomes Table(s)")
 for name in order:
@@ -256,4 +270,4 @@ st.download_button(
 # Diagnostics (optional)
 with st.expander("Show Diagnostics", expanded=False):
     st.write(outcome_names)
-    st.write(st.session_state.get("order"))
+    st.write(order)
