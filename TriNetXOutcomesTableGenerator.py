@@ -46,7 +46,7 @@ with st.sidebar.expander("Color and Style Options", expanded=False):
             stats_bg="#fbeaea", stats_fg="#990000",
         ),
         "GRAYSCALE": dict(
-            header_bg="#222", header_fg="#fff",
+            header_bg="#646464", header_fg="#fff",
             stats_bg="#eee", stats_fg="#222",
         )
     }
