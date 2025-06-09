@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Multi-Outcome Table (Direct Stat Extraction)")
+st.title("TriNetX Multi-Outcome Table (Direct Mapping, Journal Styles)")
 
 uploaded_files = st.file_uploader(
     "📂 Upload multiple TriNetX outcome files (.csv, .xls, or .xlsx)",
@@ -14,16 +14,52 @@ if not uploaded_files:
     st.info("Upload at least two TriNetX outcome files exported from TriNetX.")
     st.stop()
 
-# --- UI: Formatting Options ---
-with st.sidebar:
-    st.header("Table Colors")
-    header_bg = st.color_picker("Header background", "#17456d")
-    header_fg = st.color_picker("Header text", "#ffffff")
-    band1_bg = st.color_picker("Band 1 background", "#e6f0fa")
-    band2_bg = st.color_picker("Band 2 background", "#f5faff")
-    stats_bg = st.color_picker("Statistics row background", "#f9eab3")
-    stats_fg = st.color_picker("Statistics row text", "#764600")
-    st.header("Other Options")
+# --- Journal Styles Presets ---
+JOURNAL_STYLES = {
+    "AMA": dict(
+        header_bg="#1b365d", header_fg="#ffffff",
+        band1_bg="#f6f7fb", band2_bg="#ffffff",
+        stats_bg="#e6ecf2", stats_fg="#243952",
+        font="Arial, sans-serif", border="1px solid #b6c5db"
+    ),
+    "APA": dict(
+        header_bg="#002b36", header_fg="#fff",
+        band1_bg="#f7fbfa", band2_bg="#e3ece9",
+        stats_bg="#e1f0ee", stats_fg="#175c4c",
+        font="Times New Roman, Times, serif", border="1px solid #aab8c2"
+    ),
+    "NEJM": dict(
+        header_bg="#d6001c", header_fg="#fff",
+        band1_bg="#faf6f5", band2_bg="#fff",
+        stats_bg="#fbeaea", stats_fg="#990000",
+        font="Georgia, serif", border="1px solid #e2bfc1"
+    ),
+}
+
+# --- Expander: Journal Style ---
+with st.expander("Journal Table Style (click to expand)", expanded=False):
+    journal_style = st.radio(
+        "Select Table Style (overrides colors below):",
+        list(JOURNAL_STYLES.keys()),
+        index=0
+    )
+
+# --- Defaults from selected style ---
+defaults = JOURNAL_STYLES[journal_style]
+
+# --- Expander: Table Colors ---
+with st.expander("Table Colors (click to expand)", expanded=False):
+    header_bg = st.color_picker("Header background", defaults['header_bg'])
+    header_fg = st.color_picker("Header text", defaults['header_fg'])
+    band1_bg = st.color_picker("Band 1 background", defaults['band1_bg'])
+    band2_bg = st.color_picker("Band 2 background", defaults['band2_bg'])
+    stats_bg = st.color_picker("Statistics row background", defaults['stats_bg'])
+    stats_fg = st.color_picker("Statistics row text", defaults['stats_fg'])
+    font_family = defaults['font']
+    border_style = defaults['border']
+
+# --- Expander: Other Options ---
+with st.expander("Other Table Options (click to expand)", expanded=False):
     banded = st.checkbox("Banded rows (zebra striping)", value=True)
     bold_headers = st.checkbox("Bold column headers", value=True)
     st.markdown("---")
@@ -36,84 +72,40 @@ def extract_outcome_data(file):
         df = pd.read_excel(file, header=None)
     elif file_ext == ".csv":
         file.seek(0)
-        try:
-            df = pd.read_csv(file, header=None, skiprows=9)
-            if not any(str(cell).strip().lower().startswith("cohort") for cell in df.iloc[0]):
-                raise Exception("Header row not found after skipping 9 rows.")
-        except Exception:
-            file.seek(0)
-            df = pd.read_csv(file, header=None)
+        df = pd.read_csv(file, header=None)
     else:
         return None
 
-    # Find header row with "Cohort"
-    header_row = None
-    for i, row in df.iterrows():
-        if any(str(cell).strip().lower().startswith("cohort") for cell in row):
-            header_row = i
-            break
-    if header_row is None:
-        return None
-
-    # --- Cohort data extraction ---
-    data = df.iloc[header_row:header_row+3].copy()
-    data.columns = list(data.iloc[0])
-    data = data.iloc[1:].reset_index(drop=True)
     outcome_name = file.name.rsplit('.', 1)[0]
-    c1 = data.iloc[0]
-    c2 = data.iloc[1]
-    risk_col = [col for col in data.columns if "risk" in str(col).lower()][0]
-    n1 = c1.get("Patients in Cohort", "")
-    n2 = c2.get("Patients in Cohort", "")
-    e1 = c1.get("Patients with Outcome", "")
-    e2 = c2.get("Patients with Outcome", "")
-    risk1 = c1.get(risk_col, "")
-    risk2 = c2.get(risk_col, "")
-    cname1 = c1.get("Cohort Name", "")
-    cname2 = c2.get("Cohort Name", "")
-
-    # --- DIRECTLY EXTRACT STATISTICS FROM FIXED CELLS ---
-    stats_row_index = header_row + 14  # Row 17 in Excel is index 16, adjust as needed
-    if stats_row_index < len(df):
-        stat_row = df.iloc[stats_row_index]
-        # You may need to adjust column indices (0-based: A=0, B=1, C=2, D=3, E=4)
-        risk_diff      = stat_row[0] if len(stat_row) > 0 else ""
-        risk_diff_ci   = stat_row[1] if len(stat_row) > 1 else ""
-        odds_ratio     = stat_row[2] if len(stat_row) > 2 else ""
-        odds_ratio_ci  = stat_row[3] if len(stat_row) > 3 else ""
-        z_p            = stat_row[4] if len(stat_row) > 4 else ""
-        # Attempt to split Z and P if together (e.g., "z=1.1 p=0.03")
-        z_score, p_val = "", ""
-        if isinstance(z_p, str) and ("z=" in z_p.lower() or "p=" in z_p.lower()):
-            parts = z_p.replace("=", " ").replace(",", " ").split()
-            for i, part in enumerate(parts):
-                if part.lower() == "z":
-                    z_score = parts[i+1] if i+1 < len(parts) else ""
-                if part.lower() == "p":
-                    p_val = parts[i+1] if i+1 < len(parts) else ""
-        else:
-            z_score = z_p
-    else:
-        risk_diff = risk_diff_ci = odds_ratio = odds_ratio_ci = z_score = p_val = ""
+    # Cohort data: rows 11 & 12
+    row_c1 = df.iloc[10]
+    row_c2 = df.iloc[11]
+    # Risk Diff row 17
+    row_riskdiff = df.iloc[16]
+    # Risk Ratio row 22
+    row_riskratio = df.iloc[21]
+    # Odds Ratio row 27
+    row_oddsratio = df.iloc[26]
 
     stats_row = {
         "Outcome": "",
         "Cohort": "<b>Statistics</b>",
         "N": "",
         "Events": "",
-        "Risk": f"Risk Diff: {risk_diff} <br><span style='font-size:0.93em'>95% CI: {risk_diff_ci}</span>",
-        "Stat": f"Odds Ratio: {odds_ratio} <br><span style='font-size:0.93em'>95% CI: {odds_ratio_ci}</span>",
-        "Odds Ratio": f"Z: {z_score}",
-        "Z": f"P: {p_val}",
-        "P": ""
+        "Risk": f"Risk Diff: {row_riskdiff[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskdiff[1]}, {row_riskdiff[2]})</span>",
+        "Stat": f"Risk Ratio: {row_riskratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_riskratio[1]}, {row_riskratio[2]})</span>",
+        "Odds Ratio": f"Odds Ratio: {row_oddsratio[0]}<br><span style='font-size:0.93em'>95% CI: ({row_oddsratio[1]}, {row_oddsratio[2]})</span>",
+        "Z": f"z: {row_riskdiff[3]}",
+        "P": f"p: {row_riskdiff[4]}"
     }
+
     return [
         {
             "Outcome": outcome_name,
-            "Cohort": cname1,
-            "N": n1,
-            "Events": e1,
-            "Risk": risk1,
+            "Cohort": row_c1[0],
+            "N": row_c1[2],
+            "Events": row_c1[3],
+            "Risk": row_c1[4],
             "Stat": "",
             "Odds Ratio": "",
             "Z": "",
@@ -121,10 +113,10 @@ def extract_outcome_data(file):
         },
         {
             "Outcome": "",
-            "Cohort": cname2,
-            "N": n2,
-            "Events": e2,
-            "Risk": risk2,
+            "Cohort": row_c2[0],
+            "N": row_c2[2],
+            "Events": row_c2[3],
+            "Risk": row_c2[4],
             "Stat": "",
             "Odds Ratio": "",
             "Z": "",
@@ -142,18 +134,16 @@ for file in uploaded_files:
         outcome_blocks.append(block)
         outcome_names.append(block[0]["Outcome"])
 
-# --- Outcome Reordering with Multiselect ---
 if "order" not in st.session_state or set(st.session_state.get("order", [])) != set(outcome_names):
     st.session_state["order"] = outcome_names.copy()
 
-order = st.sidebar.multiselect(
+order = st.multiselect(
     "Drag outcomes below to reorder for display:",
     options=outcome_names,
     default=st.session_state["order"],
     key="outcome_order"
 )
 
-# Update the current session's order if changed via UI
 if order != st.session_state.get("order", []):
     st.session_state["order"] = order
 
@@ -174,23 +164,25 @@ def style_stacked_table(
         band1_bg="#e6f0fa",
         band2_bg="#f5faff",
         stats_bg="#f9eab3",
-        stats_fg="#764600"
+        stats_fg="#764600",
+        font_family="Arial, sans-serif",
+        border_style="1px solid #b8cbe9"
     ):
     css = f"""
     <style>
     .stacked-table {{
-        border-collapse:collapse;width:100%;font-family:Segoe UI,Arial,sans-serif;font-size:0.97em;
+        border-collapse:collapse;width:100%;font-family:{font_family};font-size:0.97em;
     }}
     .stacked-table th {{
         background:{header_bg};
         color:{header_fg};
         padding:7px 6px;
         font-size:1em;
-        border:1px solid #b8cbe9;
+        border:{border_style};
         {"font-weight:700;" if bold_headers else "font-weight:400;"}
     }}
     .stacked-table td {{
-        border:1px solid #d4e1f2;
+        border:{border_style};
         padding:7px 6px;
         text-align:center;
         vertical-align:middle;
@@ -218,7 +210,6 @@ def style_stacked_table(
         html += f"<th>{col}</th>"
     html += "</tr></thead><tbody>"
     for i, row in df.iterrows():
-        # Choose row class
         if (i % 3) == 2:
             row_class = 'stats-row'
         elif (i % 3) == 0:
@@ -240,6 +231,8 @@ st.markdown(style_stacked_table(
     band2_bg=band2_bg,
     stats_bg=stats_bg,
     stats_fg=stats_fg,
+    font_family=font_family,
+    border_style=border_style
 ), unsafe_allow_html=True)
 
 st.download_button(
