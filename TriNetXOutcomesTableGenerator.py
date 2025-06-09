@@ -4,7 +4,7 @@ import numpy as np
 import io
 
 st.set_page_config(layout="wide")
-st.title("TriNetX Outcomes Table (Bombproof Absolute Cell Mapping)")
+st.title("TriNetX Compact Outcomes Table")
 
 uploaded_files = st.file_uploader(
     "📂 Upload TriNetX outcome files (.csv only for max reliability)",
@@ -57,7 +57,6 @@ with st.expander("Other Table Options (click to expand)", expanded=False):
     st.caption("Drag outcome names to set display order below.")
 
 def robust_csv_to_df(uploaded_file):
-    # Reads a CSV "as-is", splitting on comma or tab, pads to max width
     raw = uploaded_file.read().decode('utf-8').splitlines()
     rows = []
     max_cols = 0
@@ -85,7 +84,6 @@ outcome_tables = []
 outcome_names = []
 for file in uploaded_files:
     df = robust_csv_to_df(file)
-
     # Ensure DataFrame is big enough for absolute cell mapping
     min_rows = 28
     min_cols = 6
@@ -99,26 +97,35 @@ for file in uploaded_files:
     default_name = file.name.rsplit('.', 1)[0]
     with st.expander(f"Customize Outcome Name for '{default_name}'", expanded=False):
         user_outcome = st.text_input("Enter Outcome Name", default_name, key=f"outcome_{default_name}")
-
     outcome_names.append(user_outcome)
 
-    # --- Absolute mapping per your design ---
+    # Compact, readable table structure
+    cohort_1 = [
+        get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4)
+    ]  # B11-E11
+    cohort_2 = [
+        get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4)
+    ]  # B12-E12
+    # Risk Difference
+    risk_diff = get_cell(df,16,0)
+    risk_diff_ci = f"({get_cell(df,16,1)}, {get_cell(df,16,2)})"
+    risk_diff_p = get_cell(df,16,4)
+    # Risk Ratio
+    risk_ratio = get_cell(df,21,0)
+    risk_ratio_ci = f"({get_cell(df,21,1)}, {get_cell(df,21,2)})"
+    # Odds Ratio
+    odds_ratio = get_cell(df,26,0)
+    odds_ratio_ci = f"({get_cell(df,26,1)}, {get_cell(df,26,2)})"
+
     block = [
-        [user_outcome, "", "", "", "", ""],  # Outcome name row
-        ["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk", "", ""],
-        [get_cell(df,10,1), get_cell(df,10,2), get_cell(df,10,3), get_cell(df,10,4), "", ""],  # B11-E11
-        [get_cell(df,11,1), get_cell(df,11,2), get_cell(df,11,3), get_cell(df,11,4), "", ""],  # B12-E12
-        ["", "", "", "", "", ""],  # spacer
-        ["Risk Difference", "", "Risk Ratio", get_cell(df,21,0), "Odds Ratio", get_cell(df,26,0)],
-        [
-            get_cell(df,16,0), get_cell(df,16,1),
-            "95% CI", f"({get_cell(df,21,1)}, {get_cell(df,21,2)})",
-            "95% CI", f"({get_cell(df,26,1)}, {get_cell(df,26,2)})"
-        ],
-        [
-            "95% CI", f"({get_cell(df,16,1)}, {get_cell(df,16,2)})", "", "",
-            "p", get_cell(df,16,4)
-        ]
+        [f"Outcome: {user_outcome}", "", "", "", ""],
+        ["Cohort Name", "Patients in Cohort", "Patients with Outcome", "Risk", ""],
+        cohort_1 + [""],
+        cohort_2 + [""],
+        ["", "", "", "", ""],
+        ["Risk Difference", risk_diff, f"95% CI: {risk_diff_ci}", f"p: {risk_diff_p}", ""],
+        ["Risk Ratio", risk_ratio, f"95% CI: {risk_ratio_ci}", "", ""],
+        ["Odds Ratio", odds_ratio, f"95% CI: {odds_ratio_ci}", "", ""],
     ]
     outcome_tables.append(block)
 
@@ -137,42 +144,49 @@ def style_block(block, bold_headers, header_bg, header_fg, stats_bg, stats_fg, f
     css = f"""
     <style>
     .custom-table {{
-        border-collapse:collapse;width:90%;font-family:{font_family};font-size:1em;margin-bottom:2em;
+        border-collapse:collapse;width:80%;font-family:{font_family};font-size:1em;margin-bottom:2em;
     }}
     .custom-table th, .custom-table td {{
         border:{border_style};
         padding:7px 6px;
         text-align:center;
     }}
-    .custom-table tr.header-row th {{
+    .custom-table thead th {{
         background:{header_bg};
         color:{header_fg};
         {"font-weight:700;" if bold_headers else ""}
-        font-size:1em;
+        font-size:1.05em;
     }}
     .custom-table tr.stats-row td {{
         background:{stats_bg};
         color:{stats_fg};
         font-weight:600;
     }}
+    .custom-table tr.outcome-row td {{
+        font-weight:600;
+        font-size:1.1em;
+        text-align:left;
+    }}
     </style>
     """
     html = css + "<table class='custom-table'><tbody>"
     for i, row in enumerate(block):
         row_class = ""
-        if i == 1:
-            row_class = "header-row"
+        if i == 0:
+            row_class = "outcome-row"
+        elif i == 1:
             tag = "th"
-        elif i > 4:
+            row_class = ""
+            html += f"<tr class='{row_class}'>" + "".join([f"<{tag}>{cell}</{tag}>" for cell in row]) + "</tr>"
+            continue
+        elif i >= 5:
             row_class = "stats-row"
-            tag = "td"
-        else:
-            tag = "td"
+        tag = "td"
         html += f"<tr class='{row_class}'>" + "".join([f"<{tag}>{cell}</{tag}>" for cell in row]) + "</tr>"
     html += "</tbody></table>"
     return html
 
-st.markdown("### Custom Outcomes Table(s)")
+st.markdown("### Custom Compact Outcomes Table(s)")
 for name in st.session_state["order"]:
     idx = outcome_names.index(name)
     block = outcome_tables[idx]
