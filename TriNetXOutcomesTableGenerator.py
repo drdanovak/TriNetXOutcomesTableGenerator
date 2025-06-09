@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-import os
 
 st.set_page_config(layout="wide")
 st.title("TriNetX Outcomes Table (Bombproof Absolute Cell Mapping)")
@@ -85,19 +84,17 @@ def get_cell(df, row, col):
 outcome_tables = []
 outcome_names = []
 for file in uploaded_files:
-    # Bombproof CSV loader
     df = robust_csv_to_df(file)
 
-    # Optionally show for validation
-    # st.write(f"Preview for file: {file.name}")
-    # st.dataframe(df.head(30))
-
+    # Ensure DataFrame is big enough for absolute cell mapping
     min_rows = 28
     min_cols = 6
     if df.shape[0] < min_rows:
-        df = pd.concat([df, pd.DataFrame([['']*df.shape[1]]*(min_rows-df.shape[0]))], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([[''] * df.shape[1] for _ in range(min_rows - df.shape[0])])], ignore_index=True)
     if df.shape[1] < min_cols:
-        df = pd.concat([df, pd.DataFrame([['']*(min_cols-df.shape[1]) for _ in range(df.shape[0]))], axis=1)
+        add_cols = min_cols - df.shape[1]
+        pad_df = pd.DataFrame([[''] * add_cols for _ in range(df.shape[0])])
+        df = pd.concat([df, pad_df], axis=1)
 
     default_name = file.name.rsplit('.', 1)[0]
     with st.expander(f"Customize Outcome Name for '{default_name}'", expanded=False):
